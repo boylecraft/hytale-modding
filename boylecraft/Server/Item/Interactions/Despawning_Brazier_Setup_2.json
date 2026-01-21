@@ -1,0 +1,5 @@
+{
+  "Type": "ExecuteCommand",
+  "Command": "perm group add despawners hytale.spawning.command.spawning.suppression",
+  "Next" : "Despawning_Brazier_Setup_3"
+}

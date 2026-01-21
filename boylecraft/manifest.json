@@ -1,0 +1,14 @@
+{
+  "Group": "boylecraft",
+  "Name": "despawning_brazier",
+  "Version": "0.0.1",
+  "Description": "requires SimpleCommandInteraction.  v1.0  https://www.curseforge.com/hytale/mods/simplecommandinteraction",
+  "Authors": [],
+  "Website": "",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": false,
+  "SubPlugins": []
+}
