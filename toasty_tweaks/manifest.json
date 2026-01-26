@@ -1,0 +1,21 @@
+{
+  "Group": "MonsterToastGames",
+  "Name": "Toasty Tweaks",
+  "Version": "0.0.1",
+  "Description": "Adds some toasty quality of life tweaks",
+  "Authors": [
+    {
+      "Name": "MonsterToastMods",
+      "Email": "",
+      "Url": "https://www.monstertoastgames.com/mods"
+    }
+  ],
+  "Website": "https://www.monstertoastgames.com/mods/toasty_tweaks",
+  "ServerVersion": "*",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": true,
+  "SubPlugins": []
+}
