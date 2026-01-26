@@ -95,7 +95,7 @@
         "Interactions": [
           {
             "Type": "ExecuteCommand",
-            "Command": "say PROTECTING THIS AREA FROM EVIL!",
+            "Command": "say PROTECTING THIS AREA FROM EVIL! @c",
             "Next": "Despawning_Brazier_Setup",
             "RunTime": 2
           }

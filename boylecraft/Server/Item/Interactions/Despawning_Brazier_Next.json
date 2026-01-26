@@ -1,4 +1,4 @@
 {
   "Type": "ExecuteCommand",
-  "Command": "sudo @s spawning suppression add Spawn_Camp"
+  "Command": "spawning suppression add Spawn_Camp @c"
 }
