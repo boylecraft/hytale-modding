@@ -1,4 +1,0 @@
-{
-  "Type": "ExecuteCommand",
-  "Command": "spawning suppression add Spawn_Camp @c"
-}
