@@ -1,0 +1,5 @@
+{
+  "Type": "ExecuteCommand",
+  "Command": "perm user group add @s despawners",
+  "Next" : "Despawning_Brazier_Next"
+}
