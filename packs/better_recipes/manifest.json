@@ -1,0 +1,21 @@
+{
+  "Group": "boylecraft",
+  "Name": "Better Recipes",
+  "Version": "0.0.1",
+  "Description": "Improved Recipes",
+  "Authors": [
+    {
+      "Name": "boylecraft",
+      "Email": "",
+      "Url": "https://github.com/boylecraft/hytale-modding"
+    }
+  ],
+  "Website": "https://github.com/boylecraft/hytale-modding/releases",
+  "ServerVersion": "*",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": true,
+  "SubPlugins": []
+}

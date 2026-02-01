@@ -11,7 +11,9 @@ on:
           # GitHub doesn't support dynamic options at runtime,
           # so keep this list in sync with /packs folder
           - spawn_blocker
-          - toasty_tweaks
+          - better_dummies
+          - better_repair_kits
+          - better_recipes
 
 permissions:
   contents: write  # required to create tags/releases

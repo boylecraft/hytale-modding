@@ -1,0 +1,26 @@
+{
+  "TimeSeconds": 1.0,
+  "Input": [
+    {
+      "ResourceTypeId": "Wood_Trunk",
+      "Quantity": 1
+    }
+  ],
+  "PrimaryOutput": {
+    "ItemId": "Ingredient_Stick",
+    "Quantity": 2
+  },
+  "Output": [
+    {
+      "ItemId": "Ingredient_Stick",
+      "Quantity": 2
+    }
+  ],
+  "BenchRequirement": [
+    {
+      "Type": "Crafting",
+      "Categories": ["Workbench_Survival"],
+      "Id": "Workbench"
+    }
+  ]
+}
