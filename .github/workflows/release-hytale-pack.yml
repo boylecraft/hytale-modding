@@ -10,7 +10,7 @@ on:
         options:
           # GitHub doesn't support dynamic options at runtime,
           # so keep this list in sync with /packs folder
-          - boylecraft
+          - spawn_blocker
           - toasty_tweaks
 
 permissions:
