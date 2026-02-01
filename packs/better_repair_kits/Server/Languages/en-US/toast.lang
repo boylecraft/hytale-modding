@@ -1,0 +1,4 @@
+## REPAIR KITS
+items.Tool_Repair_Kit_Crude.description = Used to repair tools, weapons and armor. The repaired item may lose up to 25% of its maximum durability.
+items.Tool_Repair_Kit_Iron.description = Used to safely repair tools, weapons, and armor without the item losing any maximum durability.
+

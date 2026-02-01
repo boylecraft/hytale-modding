@@ -1,26 +1,17 @@
 {
   "TranslationProperties": {
     "Name": "server.items.Tool_Repair_Kit_Crude.name",
-    "Description": "server.items.Tool_Repair_Kit_Crude.description"
+    "Description": "toast.items.Tool_Repair_Kit_Crude.description"
   },
   "Icon": "Icons/ItemsGenerated/Tool_Repair_Kit_Crude.png",
-  "Categories": [
-    "Items.Tools"
-  ],
+  "Categories": ["Items.Tools"],
   "PlayerAnimationsId": "Item",
   "Model": "Items/Tools/Repair_Kit/Repair_Kit_Crude.blockymodel",
   "Texture": "Items/Tools/Repair_Kit/Repair_Kit_Crude_Texture.png",
   "IconProperties": {
     "Scale": 0.485,
-    "Translation": [
-      0.69,
-      -25.71
-    ],
-    "Rotation": [
-      273.545,
-      207.17,
-      300.545013
-    ]
+    "Translation": [0.69, -25.71],
+    "Rotation": [273.545, 207.17, 300.545013]
   },
   "Interactions": {
     "Primary": {
@@ -29,7 +20,7 @@
           "Type": "OpenCustomUI",
           "Page": {
             "Id": "ItemRepair",
-            "RepairPenalty": 0.2
+            "RepairPenalty": 0.25
           }
         }
       ]
@@ -40,7 +31,7 @@
           "Type": "OpenCustomUI",
           "Page": {
             "Id": "ItemRepair",
-            "RepairPenalty": 0.2
+            "RepairPenalty": 0.25
           }
         }
       ]
@@ -48,11 +39,34 @@
   },
   "Set": "Repair_Kit",
   "Quality": "Common",
-  "MaxStack": 25,
+  "MaxStack": 100,
   "DropOnDeath": true,
   "Tags": {
-    "Type": [
-      "Tool"
+    "Type": ["Tool"]
+  },
+  "Recipe": {
+    "TimeSeconds": 1,
+    "Input": [
+      {
+        "ItemId": "Ingredient_Fabric_Scrap_Linen",
+        "Quantity": 2
+      },
+      {
+        "ResourceTypeId": "Rubble",
+        "Quantity": 1
+      },
+      {
+        "ItemId": "Ingredient_Hide_Light",
+        "Quantity": 2
+      }
+    ],
+    "OutputQuantity": 4,
+    "BenchRequirement": [
+      {
+        "Type": "Crafting",
+        "Categories": ["Workbench_Tools"],
+        "Id": "Workbench"
+      }
     ]
   },
   "InteractionConfig": {
