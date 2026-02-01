@@ -2,10 +2,12 @@
   "Group": "boylecraft",
   "Name": "spawn_blocker",
   "Version": "0.0.1",
-  "Description": "requires SimpleCommandInteraction.  v1.0  https://www.curseforge.com/hytale/mods/simplecommandinteraction",
+  "Description": "requires .  v1.0  https://www.curseforge.com/hytale/mods/simplecommandinteraction",
   "Authors": [],
   "Website": "https://github.com/boylecraft/hytale-modding/releases/",
-  "Dependencies": {},
+  "Dependencies": {
+    "wolfifurr:SimpleCommandInteraction": "*"
+  },
   "OptionalDependencies": {},
   "LoadBefore": {},
   "DisabledByDefault": false,
