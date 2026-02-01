@@ -1,0 +1,116 @@
+name: Release Hytale Content Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      pack:
+        description: "Which pack folder under ./packs to release"
+        required: true
+        type: choice
+        options:
+          # GitHub doesn't support dynamic options at runtime,
+          # so keep this list in sync with /packs folder
+          - boylecraft
+          - toasty_tweaks
+
+permissions:
+  contents: write  # required to create tags/releases
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tags/history needed for conflict checks
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Validate manifest + read version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACK="${{ inputs.pack }}"
+          MOD_DIR="packs/$PACK"
+          MANIFEST="$MOD_DIR/manifest.json"
+
+          if [[ ! -d "$MOD_DIR" ]]; then
+            echo "ERROR: Pack folder not found: $MOD_DIR"
+            exit 1
+          fi
+
+          if [[ ! -f "$MANIFEST" ]]; then
+            echo "ERROR: manifest.json not found at: $MANIFEST"
+            exit 1
+          fi
+
+          VERSION="$(jq -r '.Version // .version // empty' "$MANIFEST")"
+          if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+            echo "ERROR: Could not read version from manifest.json. Expected .Version or .version"
+            exit 1
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}([\-+][0-9A-Za-z\.-]+)?$ ]]; then
+            echo "ERROR: Version '$VERSION' doesn't look like SemVer-ish (e.g., 1.2.3 or 1.2.3-beta)"
+            exit 1
+          fi
+
+          echo "pack=$PACK" >> "$GITHUB_OUTPUT"
+          echo "mod_dir=$MOD_DIR" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          
+      - name: Conflict check (tag already exists?)
+        shell: bash
+        run: | 
+          set -euo pipefail
+          PACK="${{ steps.ver.outputs.pack }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          TAG="${PACK}-v${VERSION}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "ERROR: Tag $TAG already exists. Bump manifest version before releasing."
+            exit 1
+          fi
+
+      - name: Create zip artifact
+        id: zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          MOD_DIR="${{ steps.ver.outputs.mod_dir }}"
+          PACK="${{ steps.ver.outputs.pack }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+
+          ZIP_NAME="${PACK}-${VERSION}.zip"
+
+          mkdir -p dist
+          rm -f "dist/$ZIP_NAME"
+
+          (cd "packs" && zip -r "../dist/$ZIP_NAME" "$PACK" \
+            -x "**/.git/**" "**/.github/**" "**/*.DS_Store" "**/Thumbs.db")
+
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACK="${{ steps.ver.outputs.pack }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          TAG="${PACK}-v${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release and upload zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.pack }}-v${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.pack }} v${{ steps.ver.outputs.version }}
+          files: dist/${{ steps.zip.outputs.zip_name }}
+          generate_release_notes: true
