@@ -1,0 +1,14 @@
+{
+  "Group": "boylecraft",
+  "Name": "better_shovels",
+  "Version": "0.0.1",
+  "Description": "",
+  "Authors": [],
+  "Website": "",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": false,
+  "SubPlugins": []
+}

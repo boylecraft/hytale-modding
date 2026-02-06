@@ -1,0 +1,82 @@
+{
+  "TranslationProperties": {
+    "Name": "server.items.Tool_Shovel_Copper.name"
+  },
+  "Parent": "Tool_Shovel_Crude",
+  "Icon": "Icons/ItemsGenerated/Tool_Shovel_Copper.png",
+  "Model": "Items/Tools/Shovel/Copper.blockymodel",
+  "Texture": "Items/Tools/Shovel/Copper_Texture.png",
+  "Recipe": {
+    "Input": [],
+    "BenchRequirement": []
+  },
+  "Tool": {
+    "Specs": [
+      {
+        "Power": 1,
+        "GatherType": "SoftBlocks"
+      },
+      {
+        "Power": 0.2,
+        "GatherType": "Soils"
+      },
+      {
+        "Power": 0.05,
+        "GatherType": "Woods"
+      },
+      {
+        "Power": 0.05,
+        "GatherType": "Rocks"
+      },
+      {
+        "Power": 0.5,
+        "GatherType": "Benches"
+      },
+      {
+        "Power": 0.042,
+        "GatherType": "OreCopper"
+      },
+      {
+        "Power": 0.036,
+        "GatherType": "OreIron"
+      },
+      {
+        "Power": 0.036,
+        "GatherType": "OreSilver"
+      },
+      {
+        "Power": 0.036,
+        "GatherType": "OreGold"
+      },
+      {
+        "Power": 0.032,
+        "GatherType": "OreThorium"
+      },
+      {
+        "Power": 0.032,
+        "GatherType": "OreCobalt"
+      },
+      {
+        "Power": 0.028,
+        "GatherType": "OreAdamantite"
+      },
+      {
+        "Power": 0.025,
+        "GatherType": "OreMithril"
+      }
+    ],
+    "DurabilityLossBlockTypes": [
+      {
+        "BlockSets": [
+          "Stone",
+          "Rock",
+          "Ores",
+          "Soil"
+        ],
+        "DurabilityLossOnHit": 0.05
+      }
+    ]
+  },
+  "MaxDurability": 200,
+  "Quality": "Common"
+}
