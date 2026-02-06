@@ -1,3 +1,7 @@
 __*/
 *.kra*
 *.~
+.venv/
+venv/
+.idea/
+__pycache__/
