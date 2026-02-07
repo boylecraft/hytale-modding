@@ -1,14 +1,37 @@
 {
   "TranslationProperties": {
-    "Name": "server.items.Tool_Shovel_Cobalt.name"
+    "Name": "better_shovels.items.Tool_Shovel_Cobalt.name"
   },
   "Parent": "Tool_Shovel_Crude",
   "Icon": "Icons/ItemsGenerated/Tool_Shovel_Cobalt.png",
   "Model": "Items/Tools/Shovel/Cobalt.blockymodel",
   "Texture": "Items/Tools/Shovel/Cobalt_Texture.png",
   "Recipe": {
-    "Input": [],
-    "BenchRequirement": []
+    "TimeSeconds": 3.5,
+    "Input": [
+      {
+        "ItemId": "Ingredient_Bar_Cobalt",
+        "Quantity": 6
+      },
+      {
+        "ItemId": "Ingredient_Leather_Medium",
+        "Quantity": 3
+      },
+      {
+        "ItemId": "Ingredient_Fabric_Scrap_Linen",
+        "Quantity": 2
+      }
+    ],
+    "BenchRequirement": [
+      {
+        "Id": "Workbench",
+        "Type": "Crafting",
+        "Categories": [
+          "Workbench_Tools"
+        ],
+        "RequiredTierLevel": 2
+      }
+    ]
   },
   "Tool": {
     "Specs": [
@@ -17,66 +40,60 @@
         "GatherType": "SoftBlocks"
       },
       {
-        "Power": 0.5,
+        "Power": 0.2,
         "GatherType": "Soils"
       },
       {
-        "Power": 0.05,
+        "Power": 0.02,
         "GatherType": "Woods"
       },
       {
-        "Power": 0.05,
-        "GatherType": "Rocks"
+        "Power": 0.2,
+        "GatherType": "Rocks",
+        "Quality": 5
       },
       {
         "Power": 0.5,
         "GatherType": "Benches"
       },
       {
-        "Power": 0.046,
+        "Power": 0.1,
+        "GatherType": "VolcanicRocks"
+      },
+      {
+        "Power": 0.2,
         "GatherType": "OreCopper"
       },
       {
-        "Power": 0.046,
+        "Power": 0.2,
         "GatherType": "OreIron"
       },
       {
-        "Power": 0.046,
+        "Power": 0.2,
         "GatherType": "OreSilver"
       },
       {
-        "Power": 0.046,
+        "Power": 0.2,
         "GatherType": "OreGold"
       },
       {
-        "Power": 0.042,
+        "Power": 0.1,
         "GatherType": "OreThorium"
       },
       {
-        "Power": 0.042,
+        "Power": 0.1,
         "GatherType": "OreCobalt"
       },
       {
-        "Power": 0.036,
+        "Power": 0.050,
         "GatherType": "OreAdamantite"
       },
       {
-        "Power": 0.032,
+        "Power": 0.034,
         "GatherType": "OreMithril"
-      }
-    ],
-    "DurabilityLossBlockTypes": [
-      {
-        "BlockSets": [
-          "Stone",
-          "Rock",
-          "Ores",
-          "Soil"
-        ],
-        "DurabilityLossOnHit": 0.05
       }
     ]
   },
-  "MaxDurability": 300,
+  "MaxDurability": 325,
   "Quality": "Rare"
 }

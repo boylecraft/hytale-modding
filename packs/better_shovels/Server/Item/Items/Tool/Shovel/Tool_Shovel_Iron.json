@@ -1,6 +1,6 @@
 {
   "TranslationProperties": {
-    "Name": "server.items.Tool_Shovel_Iron.name"
+    "Name": "better_shovels.items.Tool_Shovel_Iron.name"
   },
   "Parent": "Tool_Shovel_Crude",
   "Icon": "Icons/ItemsGenerated/Tool_Shovel_Iron.png",
@@ -23,15 +23,6 @@
         "ItemId": "Ingredient_Fabric_Scrap_Linen",
         "Quantity": 2
       }
-    ],
-    "BenchRequirement": [
-      {
-        "Id": "Workbench",
-        "Type": "Crafting",
-        "Categories": [
-          "Workbench_Tools"
-        ]
-      }
     ]
   },
   "Tool": {
@@ -41,64 +32,59 @@
         "GatherType": "SoftBlocks"
       },
       {
-        "Power": 0.5,
+        "Power": 0.2,
         "GatherType": "Soils",
         "HitSoundLayer": "SFX_Shovel_T2_Impact_Nice"
       },
       {
-        "Power": 0.05,
+        "Power": 0.02,
         "GatherType": "Woods"
       },
       {
-        "Power": 0.05,
-        "GatherType": "Rocks"
+        "Power": 0.2,
+        "GatherType": "Rocks",
+        "Quality": 4
+	
       },
       {
         "Power": 0.5,
         "GatherType": "Benches"
       },
       {
-        "Power": 0.046,
+        "Power": 0.068,
+        "GatherType": "VolcanicRocks"
+      },
+      {
+        "Power": 0.2,
         "GatherType": "OreCopper"
       },
       {
-        "Power": 0.042,
+        "Power": 0.1,
         "GatherType": "OreIron"
       },
       {
-        "Power": 0.042,
+        "Power": 0.1,
         "GatherType": "OreSilver"
       },
       {
-        "Power": 0.042,
+        "Power": 0.1,
         "GatherType": "OreGold"
       },
       {
-        "Power": 0.036,
+        "Power": 0.05,
         "GatherType": "OreThorium"
       },
       {
-        "Power": 0.036,
+        "Power": 0.05,
         "GatherType": "OreCobalt"
       },
       {
-        "Power": 0.032,
+        "Power": 0.034,
         "GatherType": "OreAdamantite"
       },
       {
-        "Power": 0.028,
+        "Power": 0.025,
         "GatherType": "OreMithril"
-      }
-    ],
-    "DurabilityLossBlockTypes": [
-      {
-        "BlockSets": [
-          "Stone",
-          "Rock",
-          "Ores",
-          "Soil"
-        ],
-        "DurabilityLossOnHit": 0.05
       }
     ]
   },

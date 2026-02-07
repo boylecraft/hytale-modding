@@ -2,7 +2,7 @@
   "Group": "boylecraft",
   "Name": "better_shovels",
   "Version": "0.0.1",
-  "Description": "",
+  "Description": "Changes shovels into Excavators which mine dirt and rocks in a 3x3 grid. ",
   "Authors": [],
   "Website": "",
   "Dependencies": {},

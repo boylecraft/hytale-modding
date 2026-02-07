@@ -1,0 +1,7 @@
+items.Tool_Shovel_Wood.name = Wood Excavator
+items.Tool_Shovel_Cobalt.name = Cobalt Excavator
+items.Tool_Shovel_Copper.name = Copper Excavator
+items.Tool_Shovel_Crude.name = Crude Excavator
+items.Tool_Shovel_Iron.name = Iron Excavator
+items.Tool_Shovel_Thorium.name = Thorium Excavator
+items.Tool_Shovel.description = Breaks multiple blocks of dirt and rocks simultaneously.

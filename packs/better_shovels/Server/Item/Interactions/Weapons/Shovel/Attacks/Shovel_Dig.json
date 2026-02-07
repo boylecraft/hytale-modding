@@ -7,18 +7,18 @@
   "RunTime": 0.083,
   "Next": {
     "Type": "Selector",
-    "RunTime": 0.1,
+    "RunTime": 0.083,
     "Selector": {
       "Id": "Horizontal",
       "Direction": "ToLeft",
       "TestLineOfSight": true,
-      "ExtendTop": 0.5,
-      "ExtendBottom": 0.5,
-      "StartDistance": 0.5,
-      "EndDistance": 2.5,
-      "Length": 30,
-      "RollOffset": 180,
-      "YawStartOffset": -15
+      "ExtendTop": 1.1,
+      "ExtendBottom": 1.1,
+      "StartDistance": 0.01,
+      "EndDistance": 3.3,
+      "Length": 45,
+      "RollOffset": 0,
+      "YawStartOffset": -25
     },
     "HitBlock": {
       "Interactions": [
@@ -37,7 +37,7 @@
     },
     "Next": {
       "Type": "Simple",
-      "RunTime": 0.5
+      "RunTime": 0.3
     }
   }
 }

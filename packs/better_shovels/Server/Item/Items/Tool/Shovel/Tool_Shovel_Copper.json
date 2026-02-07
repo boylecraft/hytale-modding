@@ -1,6 +1,6 @@
 {
   "TranslationProperties": {
-    "Name": "server.items.Tool_Shovel_Copper.name"
+    "Name": "better_shovels.items.Tool_Shovel_Copper.name"
   },
   "Parent": "Tool_Shovel_Crude",
   "Icon": "Icons/ItemsGenerated/Tool_Shovel_Copper.png",
@@ -17,51 +17,56 @@
         "GatherType": "SoftBlocks"
       },
       {
-        "Power": 0.2,
+        "Power": 0.167,
         "GatherType": "Soils"
       },
       {
-        "Power": 0.05,
+        "Power": 0.017,
         "GatherType": "Woods"
       },
       {
-        "Power": 0.05,
-        "GatherType": "Rocks"
+        "Power": 0.117,
+        "GatherType": "Rocks",
+        "Quality": 3
       },
       {
         "Power": 0.5,
         "GatherType": "Benches"
       },
       {
-        "Power": 0.042,
+        "Power": 0.040,
+        "GatherType": "VolcanicRocks"
+      },
+      {
+        "Power": 0.083,
         "GatherType": "OreCopper"
       },
       {
-        "Power": 0.036,
+        "Power": 0.042,
         "GatherType": "OreIron"
       },
       {
-        "Power": 0.036,
+        "Power": 0.042,
         "GatherType": "OreSilver"
       },
       {
-        "Power": 0.036,
+        "Power": 0.042,
         "GatherType": "OreGold"
       },
       {
-        "Power": 0.032,
+        "Power": 0.028,
         "GatherType": "OreThorium"
       },
       {
-        "Power": 0.032,
+        "Power": 0.028,
         "GatherType": "OreCobalt"
       },
       {
-        "Power": 0.028,
+        "Power": 0.021,
         "GatherType": "OreAdamantite"
       },
       {
-        "Power": 0.025,
+        "Power": 0.017,
         "GatherType": "OreMithril"
       }
     ],

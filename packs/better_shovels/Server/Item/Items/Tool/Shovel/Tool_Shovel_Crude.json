@@ -1,7 +1,7 @@
 {
   "TranslationProperties": {
-    "Name": "server.items.Tool_Shovel_Crude.name",
-    "Description": "server.items.Tool_Shovel.description"
+    "Name": "better_shovels.items.Tool_Shovel_Crude.name",
+    "Description": "better_shovels.items.Tool_Shovel.description"
   },
   "Categories": [
     "Items.Tools"
@@ -10,6 +10,32 @@
   "Icon": "Icons/ItemsGenerated/Tool_Shovel_Crude.png",
   "Model": "Items/Tools/Shovel/Crude.blockymodel",
   "Texture": "Items/Tools/Shovel/Crude_Texture.png",
+  "Recipe": {
+  "TimeSeconds": 3.5,
+  "Input": [
+      {
+        "ResourceTypeId": "Rock",
+        "Quantity": 6
+      },
+      {
+        "ItemId": "Ingredient_Hide_Light",
+        "Quantity": 3
+      },
+      {
+        "ItemId": "Ingredient_Fabric_Scrap_Linen",
+        "Quantity": 2
+      }
+    ],
+  "BenchRequirement": [
+      {
+        "Id": "Workbench",
+        "Type": "Crafting",
+        "Categories": [
+          "Workbench_Tools"
+        ]
+      }
+    ]
+  },
   "ItemLevel": 3,
   "Tool": {
     "Specs": [
@@ -18,55 +44,56 @@
         "GatherType": "SoftBlocks"
       },
       {
-        "Power": 0.4,
+        "Power": 0.10,
         "GatherType": "Soils"
       },
       {
-        "Power": 0.05,
+        "Power": 0.017,
         "GatherType": "Woods"
       },
       {
-        "Power": 0.05,
-        "GatherType": "Rocks"
+        "Power": 0.075,
+        "GatherType": "Rocks",
+        "Quality": 2
       },
       {
         "Power": 0.5,
         "GatherType": "Benches"
       },
       {
-        "Power": 0.017,
+        "Power": 0.029,
         "GatherType": "VolcanicRocks"
       },
       {
-        "Power": 0.036,
+        "Power": 0.058,
         "GatherType": "OreCopper"
       },
       {
-        "Power": 0.032,
+        "Power": 0.033,
         "GatherType": "OreIron"
       },
       {
-        "Power": 0.032,
+        "Power": 0.033,
         "GatherType": "OreSilver"
       },
       {
-        "Power": 0.032,
+        "Power": 0.033,
         "GatherType": "OreGold"
       },
       {
-        "Power": 0.028,
+        "Power": 0.023,
         "GatherType": "OreThorium"
       },
       {
-        "Power": 0.028,
+        "Power": 0.023,
         "GatherType": "OreCobalt"
       },
       {
-        "Power": 0.025,
+        "Power": 0.018,
         "GatherType": "OreAdamantite"
       },
       {
-        "Power": 0.023,
+        "Power": 0.015,
         "GatherType": "OreMithril"
       }
     ],

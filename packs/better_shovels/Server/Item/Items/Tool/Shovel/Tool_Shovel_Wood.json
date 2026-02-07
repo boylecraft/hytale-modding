@@ -1,0 +1,100 @@
+{
+  "TranslationProperties": {
+    "Name": "better_shovels.items.Tool_Shovel_Wood.name"
+  },
+  "Parent": "Tool_Shovel_Crude",
+  "Icon": "Icons/ItemsGenerated/Tool_Shovel_Wood.png",
+  "Model": "Items/Tools/Shovel/Wood.blockymodel",
+  "Texture": "Items/Tools/Shovel/Wood_Texture.png",
+  "Recipe": {
+    "TimeSeconds": 3.5,
+    "Input": [
+      {
+        "ResourceTypeId": "Wood_Trunk",
+        "Quantity": 4
+      },
+      {
+        "ItemId": "Ingredient_Hide_Light",
+        "Quantity": 2
+      },
+      {
+        "ItemId": "Ingredient_Fabric_Scrap_Linen",
+        "Quantity": 1
+      }
+    ]
+  },
+  "ItemLevel": 1,
+  "Tool": {
+    "Specs": [
+      {
+        "Power": 1,
+        "GatherType": "SoftBlocks"
+      },
+      {
+        "Power": 0.05,
+        "GatherType": "Soils"
+      },
+      {
+        "Power": 0.017,
+        "GatherType": "Woods"
+      },
+      {
+        "Power": 0.042,
+        "GatherType": "Rocks",
+        "Quality": 1
+      },
+      {
+        "Power": 0.5,
+        "GatherType": "Benches"
+      },
+      {
+        "Power": 0.019,
+        "GatherType": "VolcanicRocks"
+      },
+      {
+        "Power": 0.033,
+        "GatherType": "OreCopper"
+      },
+      {
+        "Power": 0.024,
+        "GatherType": "OreIron"
+      },
+      {
+        "Power": 0.024,
+        "GatherType": "OreSilver"
+      },
+      {
+        "Power": 0.024,
+        "GatherType": "OreGold"
+      },
+      {
+        "Power": 0.019,
+        "GatherType": "OreThorium"
+      },
+      {
+        "Power": 0.019,
+        "GatherType": "OreCobalt"
+      },
+      {
+        "Power": 0.015,
+        "GatherType": "OreAdamantite"
+      },
+      {
+        "Power": 0.013,
+        "GatherType": "OreMithril"
+      }
+    ],
+    "DurabilityLossBlockTypes": [
+      {
+        "BlockSets": [
+          "Stone",
+          "Rock",
+          "Ores",
+          "Soil"
+        ],
+        "DurabilityLossOnHit": 0.25
+      }
+    ]
+  },
+  "Quality": "Common"
+}
