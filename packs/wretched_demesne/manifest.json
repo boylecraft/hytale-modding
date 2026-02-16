@@ -1,0 +1,14 @@
+{
+  "Group": "boylecraft",
+  "Name": "leng",
+  "Version": "0.0.1",
+  "Description": "",
+  "Authors": [],
+  "Website": "",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": false,
+  "SubPlugins": []
+}

@@ -1,0 +1,33 @@
+{
+  "Type": "NoiseRange",
+  "Biomes": [{
+      "Biome" : "Leng_Biome_Basic",
+      "Min" : -1,
+      "Max" : 2
+    }
+  ],
+  "DefaultBiome": "Leng_Biome_Basic",
+  "DefaultTransitionDistance": 32,
+  "MaxBiomeEdgeDistance" : 32,
+  "Density": {
+    "Type" : "Imported",
+    "Name" : "Biome-Map"
+	},
+  "ContentFields" : [
+    {
+      "Type" : "BaseHeight",
+      "Name" : "Base",
+      "Y" : 150
+    },
+    {
+      "Type" : "BaseHeight",
+      "Name" : "Water",
+      "Y" : 130
+    },
+    {
+      "Type" : "BaseHeight",
+      "Name" : "Bedrock",
+      "Y" : 0
+    }
+  ]
+}
