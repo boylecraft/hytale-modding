@@ -1,0 +1,7 @@
+{
+  "IncludeRoles": [
+    "Chicken",
+    "Chicken_Chick",
+    "Chicken_Favorelle"
+  ]
+}

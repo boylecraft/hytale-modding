@@ -1,0 +1,21 @@
+{
+  "Group": "boylecraft",
+  "Name": "Better Chickens",
+  "Version": "0.0.1",
+  "Description": "More and Better Chickens!",
+  "Authors": [
+    {
+      "Name": "boylecraft",
+      "Email": "",
+      "Url": "https://github.com/boylecraft/hytale-modding"
+    }
+  ],
+  "Website": "https://github.com/boylecraft/hytale-modding/releases",
+  "ServerVersion": "*",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": true,
+  "SubPlugins": []
+}
