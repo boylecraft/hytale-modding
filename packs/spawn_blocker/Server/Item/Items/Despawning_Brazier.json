@@ -1,12 +1,10 @@
 {
   "TranslationProperties": {
     "Name": "boylecraft.items.Despawning_Brazier.name",
-    "Description": "boylecraft.items.Despawning_Brazier.description" 
+    "Description": "boylecraft.items.Despawning_Brazier.description"
   },
   "PlayerAnimationsId": "Block",
-  "Categories": [
-    "Furniture.Lighting"
-  ],
+  "Categories": ["Furniture.Lighting"],
   "Set": "Furniture_Temple_Light",
   "Recipe": {
     "Input": [
@@ -27,9 +25,7 @@
       {
         "Type": "Crafting",
         "Id": "Furniture_Bench",
-        "Categories": [
-          "Furniture_Lighting"
-        ]
+        "Categories": ["Furniture_Lighting"]
       }
     ]
   },
@@ -96,7 +92,42 @@
           {
             "Type": "ExecuteCommand",
             "Command": "say PROTECTING THIS AREA FROM EVIL!",
-            "Next": "Despawning_Brazier_Setup",
+            "Next": {
+              "Type": "ExecuteCommand",
+              "Command": "perm group add despawners@su hytale.spawning.command.spawning @c",
+              "Next": {
+                "Type": "ExecuteCommand",
+                "Command": "perm group add despawners@su hytale.spawning.command.spawning.suppression @c",
+                "Next": {
+                  "Type": "ExecuteCommand",
+                  "Command": "perm group add despawners@su hytale.spawning.command.spawning.suppression.add @c",
+                  "Next": {
+                    "Type": "ExecuteCommand",
+                    "Command": "perm user group add @su despawners@su @c",
+                    "Next": {
+                      "Type": "ExecuteCommand",
+                      "Command": "spawning suppression add Spawn_Camp",
+                      "Next": {
+                        "Type": "ExecuteCommand",
+                        "Command": "perm group remove despawners@su hytale.spawning.command.spawning.suppression.add @c",
+                        "Next": {
+                          "Type": "ExecuteCommand",
+                          "Command": "perm group remove despawners@su hytale.spawning.command.spawning.suppression @c",
+                          "Next": {
+                            "Type": "ExecuteCommand",
+                            "Command": "perm group remove despawners@su hytale.spawning.command.spawning @c",
+                            "Next": {
+                              "Type": "ExecuteCommand",
+                              "Command": "perm user group remove @su despawners@su @c"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "RunTime": 2
           }
         ]
@@ -104,12 +135,8 @@
     }
   },
   "Tags": {
-    "Type": [
-      "Furniture"
-    ],
-    "Family": [
-      "Temple"
-    ]
+    "Type": ["Furniture"],
+    "Family": ["Temple"]
   },
   "ItemSoundSetId": "ISS_Blocks_Stone",
   "Icon": "Icons/ItemsGenerated/Despawning_Brazier.png"

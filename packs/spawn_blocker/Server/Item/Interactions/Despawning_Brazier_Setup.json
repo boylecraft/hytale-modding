@@ -1,5 +1,32 @@
 {
   "Type": "ExecuteCommand",
-  "Command": "perm group add despawners hytale.spawning.command.spawning",
-  "Next" : "Despawning_Brazier_Setup_2"
+  "Command": "perm group add despawners@su hytale.spawning.command.spawning @c",
+  "Next": {
+    "Type": "ExecuteCommand",
+    "Command": "perm group add despawners@su hytale.spawning.command.spawning.suppression @c",
+    "Next": {
+      "Type": "ExecuteCommand",
+      "Command": "perm group add despawners@su hytale.spawning.command.spawning.suppression.add @c",
+      "Next": {
+        "Type": "ExecuteCommand",
+        "Command": "perm user group add @su despawners@su @c",
+        "Next": {
+          "Type": "ExecuteCommand",
+          "Command": "spawning suppression add Spawn_Camp",
+          "Next": {
+            "Type": "ExecuteCommand",
+            "Command": "perm group remove despawners@su hytale.spawning.command.spawning.suppression.add @c",
+            "Next": {
+              "Type": "ExecuteCommand",
+              "Command": "perm group remove despawners@su hytale.spawning.command.spawning.suppression @c",
+              "Next": {
+                "Type": "ExecuteCommand",
+                "Command": "perm group remove despawners@su hytale.spawning.command.spawning @c"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
