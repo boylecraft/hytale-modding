@@ -1,14 +1,542 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from PIL import Image, ImageEnhance
+import numpy as np
 import argparse
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 
 Json = Union[Dict[str, Any], List[Any], str, int, float, bool, None]
+
+
+# ----------------------------
+# Image editing helpers
+# ----------------------------
+
+_BAYER8 = np.array([
+    [ 0, 48, 12, 60,  3, 51, 15, 63],
+    [32, 16, 44, 28, 35, 19, 47, 31],
+    [ 8, 56,  4, 52, 11, 59,  7, 55],
+    [40, 24, 36, 20, 43, 27, 39, 23],
+    [ 2, 50, 14, 62,  1, 49, 13, 61],
+    [34, 18, 46, 30, 33, 17, 45, 29],
+    [10, 58,  6, 54,  9, 57,  5, 53],
+    [42, 26, 38, 22, 41, 25, 37, 21],
+], dtype=np.float32)
+
+
+def _npc_path_to_base_common_any(base_assets_root: Path, engine_path: str) -> Path:
+    """Maps engine path like 'NPC/.../Models/Model.blockymodel' to '<assets>/Common/NPC/.../Models/Model.blockymodel'"""
+    if engine_path.startswith("/"):
+        engine_path = engine_path[1:]
+    return base_assets_root / "Common" / Path(engine_path)
+
+
+def _npc_path_to_mod_common_any(mod_root: Path, engine_path: str) -> Path:
+    """Maps engine path like 'NPC/.../Models/Texture.png' to '<mod>/Common/NPC/.../Models/Texture.png'"""
+    if engine_path.startswith("/"):
+        engine_path = engine_path[1:]
+    return mod_root / "Common" / Path(engine_path)
+
+
+def _scale_blockymodel_uv_offsets(doc: Json, scale: int) -> Json:
+    """
+    Multiply every textureLayout.*.offset.x/y by scale.
+    Works for both box faces and quad 'front' layouts.
+    """
+    if scale <= 1:
+        return doc
+
+    def walk(x: Json) -> None:
+        if isinstance(x, dict):
+            # textureLayout node
+            tl = x.get("textureLayout")
+            if isinstance(tl, dict):
+                for face in tl.values():
+                    if isinstance(face, dict):
+                        off = face.get("offset")
+                        if isinstance(off, dict):
+                            if "x" in off and isinstance(off["x"], (int, float)):
+                                off["x"] = off["x"] * scale
+                            if "y" in off and isinstance(off["y"], (int, float)):
+                                off["y"] = off["y"] * scale
+
+            for v in x.values():
+                walk(v)
+
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(doc)
+    return doc
+
+
+def _generate_scaled_blockymodel_from_base_appearance(
+    *,
+    base_assets_root: Path,
+    mod_root: Path,
+    base_appearance_doc: Json,          # <-- THIS is read from cfg.sources.model.base
+    out_texture_engine_path: str,       # e.g. NPC/.../Bobby/Models/Texture.png
+    scale: int,
+) -> str:
+    """
+    Uses the base appearance JSON's "Model" field to locate the source .blockymodel,
+    scales its textureLayout offsets by `scale`, and writes the result next to the
+    generated texture. Returns the engine path to the written .blockymodel.
+    """
+    if scale <= 1:
+        raise ValueError("scale must be > 1")
+
+    if not isinstance(base_appearance_doc, dict):
+        raise ValueError("base_appearance_doc must be an object")
+
+    base_blocky_engine = base_appearance_doc.get("Model")
+    if not isinstance(base_blocky_engine, str) or not base_blocky_engine:
+        raise ValueError('Base appearance JSON missing non-empty "Model" path')
+
+    # Load source blockymodel from base assets
+    base_blocky_file = _npc_path_to_base_common_any(base_assets_root, base_blocky_engine)
+    if not base_blocky_file.exists():
+        raise FileNotFoundError(f"Base blockymodel not found: {base_blocky_file} (from '{base_blocky_engine}')")
+
+    blocky_doc = json.loads(base_blocky_file.read_text(encoding="utf-8"))
+    blocky_doc = _scale_blockymodel_uv_offsets(blocky_doc, scale)
+
+    # Output blockymodel path: same folder as output texture
+    out_tex_p = Path(out_texture_engine_path)
+    out_blocky_engine = str(out_tex_p.parent / "Model.blockymodel").replace("\\", "/")
+
+    out_blocky_file = _npc_path_to_mod_common_any(mod_root, out_blocky_engine)
+    _ensure_parent_dir(out_blocky_file)
+    out_blocky_file.write_text(json.dumps(blocky_doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return out_blocky_engine
+
+
+def _apply_resize(img: Image.Image, *, scale: int, resample: str) -> Image.Image:
+    if scale <= 1:
+        return img
+
+    resample_map = {
+        "nearest": Image.Resampling.NEAREST,
+        "bilinear": Image.Resampling.BILINEAR,
+        "bicubic": Image.Resampling.BICUBIC,
+        "lanczos": Image.Resampling.LANCZOS,
+    }
+    if resample not in resample_map:
+        raise ValueError(f"resize.resample must be one of {list(resample_map.keys())}, got '{resample}'")
+
+    w, h = img.size
+    return img.resize((w * scale, h * scale), resample=resample_map[resample])
+
+
+def _blue_noise_tile(size: int, seed: int) -> np.ndarray:
+    """
+    Returns a (size,size) threshold tile in [0,1), "blue-noise-ish".
+    Deterministic given (size, seed).
+    """
+    if size <= 1:
+        return np.array([[0.0]], dtype=np.float32)
+
+    rng = np.random.default_rng(seed)
+    noise = rng.random((size, size)).astype(np.float32)
+
+    # High-pass filter in frequency domain to reduce low-frequency clumps
+    f = np.fft.fft2(noise)
+    fy = np.fft.fftfreq(size).reshape(-1, 1)
+    fx = np.fft.fftfreq(size).reshape(1, -1)
+    r2 = fx * fx + fy * fy
+
+    # Smooth high-pass: suppress low frequencies
+    # k controls cutoff-ish. This is a heuristic; tweak if needed.
+    k = 6.0
+    hp = 1.0 - np.exp(-k * r2)
+
+    f_hp = f * hp
+    filtered = np.fft.ifft2(f_hp).real.astype(np.float32)
+
+    # Normalize to [0,1)
+    mn = float(filtered.min())
+    mx = float(filtered.max())
+    if mx - mn < 1e-8:
+        return np.zeros((size, size), dtype=np.float32)
+    t = (filtered - mn) / (mx - mn)
+    # Avoid exact 1.0
+    t = np.clip(t, 0.0, np.nextafter(1.0, 0.0)).astype(np.float32)
+    return t
+
+
+def _blue_noise_threshold_map(h: int, w: int, *, tile: int = 64, seed: int = 0) -> np.ndarray:
+    tile = int(tile)
+    if tile <= 0:
+        tile = 64
+    t = _blue_noise_tile(tile, seed)
+    return np.tile(t, (int(np.ceil(h / tile)), int(np.ceil(w / tile))))[:h, :w]
+
+
+def _bayer_threshold_map(h: int, w: int, *, size: int = 8) -> np.ndarray:
+    if size != 8:
+        raise ValueError("Only bayer8 implemented here")
+    # (m + 0.5) / 64 gives a nicer distribution (avoids threshold=0 exact)
+    mat = (_BAYER8 + 0.5) / 64.0
+    return np.tile(mat, (int(np.ceil(h/8)), int(np.ceil(w/8))))[:h, :w]
+
+
+def _clamp01(x: float) -> float:
+    return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
+
+
+def _bayer_matrix(n: int) -> np.ndarray:
+    """
+    Returns NxN Bayer threshold matrix normalized to [0,1).
+    n must be power of 2 (e.g., 2,4,8,16).
+    """
+    if n == 1:
+        return np.array([[0]], dtype=np.float32)
+    if n & (n - 1) != 0:
+        raise ValueError("Bayer matrix size must be a power of 2")
+    # recursive construction
+    prev = _bayer_matrix(n // 2)
+    a = prev * 4 + 0
+    b = prev * 4 + 2
+    c = prev * 4 + 3
+    d = prev * 4 + 1
+    top = np.concatenate([a, b], axis=1)
+    bot = np.concatenate([c, d], axis=1)
+    m = np.concatenate([top, bot], axis=0).astype(np.float32)
+    return m / (n * n)
+
+
+def _apply_opacity_dither(
+    img: Image.Image,
+    *,
+    amount: float,
+    pattern: str = "bayer8",
+    preserve_holes: bool = True,
+    seed: int = 0,
+    tile: int = 64,
+) -> Image.Image:
+    """
+    Converts intended opacity into cutout alpha via dithering.
+    Output alpha will be only 0 or 255.
+
+    - amount in [0..1] is a global coverage multiplier.
+    - preserve_holes=True keeps originally transparent pixels (alpha==0) as holes.
+    - pattern: "bayer8", "bayer16", "blue_noise"
+    - seed/tile used for blue_noise
+    """
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.uint8)
+
+    pat = pattern.lower().strip()
+
+    if pat == "blue_noise":
+        a = arr[..., 3].astype(np.float32) / 255.0
+        amount = _clamp01(float(amount))
+        coverage = np.clip(a * amount, 0.0, 1.0)
+        thresh = _blue_noise_threshold_map(arr.shape[0], arr.shape[1], tile=tile, seed=seed)
+        keep = coverage > thresh
+        if preserve_holes:
+            keep &= (a > 0.0)
+    elif pat.startswith("bayer"):
+        h, w = arr.shape[:2]
+        th = _bayer_threshold_map(h, w, size=8)  # 0..1
+        coverage = np.clip(float(amount), 0.0, 1.0)
+        keep = th < coverage
+        if preserve_holes:
+            keep &= (arr[..., 3] > 0)
+    else:
+        raise ValueError(f"Unsupported dither pattern: {pattern!r} (use bayer4/bayer8/bayer16 or blue_noise)")
+
+    arr[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
+
+    out = arr.copy()
+    out[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
+    return Image.fromarray(out, mode="RGBA")
+
+
+def _apply_opacity_dither_rgba_worked(img: Image.Image, *, amount: float, preserve_holes: bool = True) -> Image.Image:
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.uint8)
+    h, w = arr.shape[:2]
+
+    th = _bayer_threshold_map(h, w, size=8)  # 0..1
+
+    alpha = arr[..., 3].astype(np.float32) / 255.0
+    # coverage = np.clip(alpha * float(amount), 0.0, 1.0)
+    coverage = np.clip(float(amount), 0.0, 1.0)
+
+    keep = th < coverage
+
+    if preserve_holes:
+        keep &= (arr[..., 3] > 0)
+
+    arr[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
+    return Image.fromarray(arr, "RGBA")
+
+
+def _apply_opacity_dither_broke(
+    img: Image.Image,
+    *,
+    amount: float,
+    pattern: str = "bayer8",
+    preserve_holes: bool = True,
+) -> Image.Image:
+    """
+    Converts intended opacity into cutout alpha via ordered dithering.
+    Output alpha will be only 0 or 255.
+
+    - amount in [0..1] is a global coverage multiplier.
+    - preserve_holes=True keeps originally transparent pixels (alpha==0) as holes.
+    """
+    amount = _clamp01(float(amount))
+    if amount >= 1.0:
+        # no change; but still ensure RGBA for consistency
+        return img.convert("RGBA")
+
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.uint8)  # H,W,4
+    a = arr[..., 3].astype(np.float32) / 255.0  # existing alpha (holes/cutouts)
+
+    # Combine existing alpha with global desired opacity
+    coverage = a * amount  # per-pixel desired coverage in [0..1]
+
+    # Optional: if you want to *not* reduce opaque pixels unless they're already holes:
+    # you can use coverage = np.where(a > 0, amount, 0) instead.
+    # Current choice preserves fine alpha detail from your pipeline (pre-dither).
+
+    # Build threshold pattern
+    pat = pattern.lower().strip()
+    if pat.startswith("bayer"):
+        # allow "bayer8", "bayer4", etc.
+        size = int(pat.replace("bayer", ""))
+        mat = _bayer_matrix(size)  # size x size in [0,1)
+        h, w = coverage.shape
+        # tile to image size
+        tiled = np.tile(mat, (int(np.ceil(h / size)), int(np.ceil(w / size))))[:h, :w]
+        thresh = tiled
+    else:
+        raise ValueError(f"Unsupported dither pattern: {pattern!r} (use bayer4/bayer8/bayer16)")
+
+    # Dither: keep pixel if coverage > threshold
+    keep = coverage > thresh
+
+    if preserve_holes:
+        keep = keep & (a > 0.0)
+
+    out = arr.copy()
+    out[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
+    return Image.fromarray(out, mode="RGBA")
+
+def _ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _npc_path_to_common_file(mod_root: Path, npc_path: str) -> Path:
+    """
+    Converts an engine-style NPC path like:
+      "NPC/Livestock/Chicken/Models/Texture.png"
+    into a real file path under the mod:
+      "<mod_root>/Common/NPC/Livestock/Chicken/Models/Texture.png"
+    """
+    if npc_path.startswith("/"):
+        npc_path = npc_path[1:]
+    return mod_root / "Common" / Path(npc_path)
+
+
+def _npc_path_to_base_common_file(base_assets_root: Path, npc_path: str) -> Path:
+    """
+    Base assets path equivalent:
+      "<base_assets_root>/Common/NPC/..."
+    """
+    if npc_path.startswith("/"):
+        npc_path = npc_path[1:]
+    return base_assets_root / "Common" / Path(npc_path)
+
+
+def _apply_desaturate(img: Image.Image, amount: float) -> Image.Image:
+    """
+    amount=0 -> no change
+    amount=1 -> fully desaturated (grayscale but kept in RGB)
+    """
+    amount = float(amount)
+    if amount <= 0:
+        return img
+    if amount >= 1:
+        return img.convert("L").convert("RGBA") if img.mode in ("RGBA", "LA") else img.convert("L").convert("RGB")
+    # partial: use Color enhancer (saturation)
+    # Pillow uses "Color" enhancer where factor=1 is original, factor=0 is grayscale.
+    enhancer = ImageEnhance.Color(img)
+    factor = 1.0 - amount
+    return enhancer.enhance(factor)
+
+
+def _apply_tint_rgba(img: Image.Image, *, rgba: tuple[float, float, float, float], amount: float = 1.0) -> Image.Image:
+    """
+    Multiplies RGB (and optionally alpha) by rgba factors in [0..1].
+    amount blends between original and tinted: 0=original, 1=tinted.
+    """
+    amount = float(amount)
+    if amount <= 0:
+        return img
+
+    # Always work in RGBA
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.float32) / 255.0  # shape (H,W,4)
+
+    r, g, b, a = rgba
+    tinted = arr.copy()
+    tinted[..., 0] *= r
+    tinted[..., 1] *= g
+    tinted[..., 2] *= b
+    tinted[..., 3] *= a
+
+    if amount < 1.0:
+        tinted = arr * (1.0 - amount) + tinted * amount
+
+    tinted = np.clip(tinted * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(tinted, mode="RGBA")
+
+
+def _generate_texture(
+        *,
+        base_assets_root: Path,
+        mod_root: Path,
+        base_model_doc: Json,
+        spec: Dict[str, Any],
+) -> tuple[str, str | None]:
+    """
+    Returns the engine texture path string that should be written into /Texture,
+    and writes the generated file into mod_root/Common/...
+    """
+    scale_used = 1
+
+    from_spec = spec.get("from")
+    out_npc_path = spec.get("out")
+    transform = spec.get("transform") or {}
+    out_texture_engine_path = out_npc_path  # what you already return today
+
+    if not isinstance(out_npc_path, str) or not out_npc_path:
+        raise ValueError("Texture gen spec missing non-empty 'out'")
+
+    # Resolve input texture NPC path
+    in_npc_path: Optional[str] = None
+
+    if isinstance(from_spec, dict) and from_spec.get("$base_model_texture") is True:
+        # Use base model json Texture field
+        base_tex = base_model_doc
+        if not isinstance(base_tex, dict) or "Texture" not in base_tex:
+            raise ValueError("Base model doc missing 'Texture'")
+        if not isinstance(base_tex["Texture"], str) or not base_tex["Texture"]:
+            raise ValueError("Base model doc 'Texture' must be a non-empty string")
+        in_npc_path = base_tex["Texture"]
+    elif isinstance(from_spec, dict) and isinstance(from_spec.get("path"), str):
+        in_npc_path = from_spec["path"]
+    elif isinstance(from_spec, str):
+        in_npc_path = from_spec
+
+    if not in_npc_path:
+        raise ValueError("Texture gen spec 'from' must be '$base_model_texture' or a path string")
+
+    in_file = _npc_path_to_base_common_file(base_assets_root, in_npc_path)
+    if not in_file.exists():
+        raise FileNotFoundError(f"Input texture not found: {in_file} (from '{in_npc_path}')")
+
+    out_file = _npc_path_to_common_file(mod_root, out_npc_path)
+    _ensure_parent_dir(out_file)
+
+    # Load + transform
+    img = Image.open(in_file)
+
+    # Preserve alpha if present; normalize to RGBA when alpha exists
+    if img.mode not in ("RGB", "RGBA"):
+        # keep alpha if paletted-with-transparency etc
+        img = img.convert("RGBA") if "A" in img.getbands() else img.convert("RGB")
+
+    # Currently supported transform: desaturate
+    if "desaturate" in transform:
+        ds = transform["desaturate"]
+        amount = ds.get("amount", 1.0) if isinstance(ds, dict) else 1.0
+        img = _apply_desaturate(img, amount)
+
+    if "tint" in transform:
+        t = transform["tint"]
+        if not isinstance(t, dict):
+            raise ValueError("transform.tint must be an object")
+
+        amount = float(t.get("amount", 1.0))
+
+        if "rgba" in t:
+            rgba = t["rgba"]
+            if not (isinstance(rgba, list) and len(rgba) == 4):
+                raise ValueError("transform.tint.rgba must be a 4-element array")
+            rgba_t = tuple(float(x) for x in rgba)
+        elif "rgb" in t:
+            rgb = t["rgb"]
+            if not (isinstance(rgb, list) and len(rgb) == 3):
+                raise ValueError("transform.tint.rgb must be a 3-element array")
+            rgba_t = (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
+        else:
+            raise ValueError("transform.tint requires 'rgb' or 'rgba'")
+
+        img = _apply_tint_rgba(img, rgba=rgba_t, amount=amount)
+
+    # Resize (do this BEFORE opacity/dither so holes get smaller)
+    if "resize" in transform:
+        r = transform["resize"]
+        if not isinstance(r, dict):
+            raise ValueError("transform.resize must be an object")
+        scale = int(r.get("scale", 1))
+        resample = str(r.get("resample", "nearest")).lower()
+        img = _apply_resize(img, scale=scale, resample=resample)
+        scale_used = scale
+
+    if "opacity" in transform:
+        o = transform["opacity"]
+        if not isinstance(o, dict):
+            raise ValueError("transform.opacity must be an object")
+        op_amount = float(o.get("amount", 1.0))
+        mode = str(o.get("mode", "dither")).lower()
+        pattern = str(o.get("pattern", "bayer8"))
+        preserve_holes = bool(o.get("preserve_holes", True))
+
+        if mode in ("dither", "mask", "cutout"):
+            seed = int(o.get("seed", 0))
+            tile = int(o.get("tile", 64))
+            img = _apply_opacity_dither(
+                img,
+                amount=op_amount,
+                pattern=pattern,
+                preserve_holes=preserve_holes,
+                seed=seed,
+                tile=tile,
+            )
+
+        elif mode in ("none", "keep"):
+            pass
+        else:
+            raise ValueError(f"Unsupported opacity mode: {mode!r}")
+
+    # Save
+    img.save(out_file, format="PNG")
+
+    out_blocky_engine_path: str | None = None
+    if scale_used > 1:
+        out_blocky_engine_path = _generate_scaled_blockymodel_from_base_appearance(
+            base_assets_root=base_assets_root,
+            mod_root=mod_root,
+            base_appearance_doc=base_model_doc,
+            out_texture_engine_path=out_texture_engine_path,
+            scale=scale_used,
+        )
+
+    # Return engine-facing path (still "NPC/...")
+    return out_texture_engine_path, out_blocky_engine_path
 
 
 # ----------------------------
@@ -279,8 +807,38 @@ def compile_variants(
         model_doc = json.loads(json.dumps(base_model_doc))
         role_doc = json.loads(json.dumps(base_role_doc))
 
-        # Apply patches
-        apply_json_patch(model_doc, v.model_ops, strict_paths=strict_paths)
+        # Preprocess model ops: allow generated texture specs
+        processed_model_ops: List[Dict[str, Any]] = []
+        for op in v.model_ops:
+            # copy op so we can safely mutate
+            op2 = json.loads(json.dumps(op))
+            if op2.get("op") == "replace" and op2.get("path") == "/Texture":
+                val = op2.get("value")
+                if isinstance(val, dict) and "$gen_texture" in val:
+                    spec = val["$gen_texture"]
+                    out_tex, out_blocky = _generate_texture(
+                        base_assets_root=base_assets_root,
+                        mod_root=mod_root,
+                        base_model_doc=base_model_doc,
+                        spec=spec,
+                    )
+
+                    # Patch /Texture to new texture path
+                    op2["value"] = out_tex
+                    processed_model_ops.append(op2)
+
+                    # ALSO patch /Model to new blockymodel (if we made one)
+                    if out_blocky is not None:
+                        processed_model_ops.append({
+                            "op": "replace",
+                            "path": "/Model",
+                            "value": out_blocky,
+                        })
+
+                    continue
+            processed_model_ops.append(op2)
+
+        apply_json_patch(model_doc, processed_model_ops, strict_paths=strict_paths)
         apply_json_patch(role_doc, v.role_ops, strict_paths=strict_paths)
 
         # Write generated assets
@@ -322,3 +880,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    texture = r'C:\dev\hytale\hytale-modding\packs\better_variants\Common\NPC\Livestock\Chicken_Variants\Bobby\Models\Texture.png'
+    if not os.path.exists(texture):
+        print(f"{texture} not exists")
+
+    img = Image.open(texture).convert("RGBA")
+    a = np.asarray(img)[..., 3]
+    print("alpha==0:", (a == 0).sum(), " / ", a.size)
+    print("alpha unique:", np.unique(a)[:20], "...")

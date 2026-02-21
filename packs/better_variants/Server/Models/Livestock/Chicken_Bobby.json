@@ -1,5 +1,5 @@
 {
-  "Model": "NPC/Livestock/Chicken/Models/Model.blockymodel",
+  "Model": "NPC/Livestock/Chicken_Variants/Bobby/Models/Model.blockymodel",
   "Texture": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png",
   "EyeHeight": 0.7,
   "CrouchOffset": -0.2,
