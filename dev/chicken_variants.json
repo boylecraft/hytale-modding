@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "server_version": "2026.02.19-1a311a592",
+
+  "outputs": {
+    "model_dir": "Server/Models/Livestock",
+    "role_dir": "Server/NPC/Roles/Creature/Livestock"
+  },
+
+  "sources": {
+    "model": { "base": "Server/Models/Livestock/Chicken.json" },
+    "role":  { "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json" }
+  },
+
+  "variants": [
+    {
+      "id": "Chicken_Bobby",
+      "patches": {
+        "model": [
+          { "op": "replace", "path": "/Texture", "value": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png" }
+        ],
+        "role": [
+          { "op": "replace", "path": "/Modify/Appearance", "value": "Chicken_Bobby" },
+          { "op": "replace", "path": "/Parameters/NameTranslationKey/Value", "value": "better_variants.npcRoles.Chicken_Bobby.name" }
+        ]
+      }
+    },
+    {
+      "id": "Chicken_Speckles",
+      "patches": {
+        "model": [
+          { "op": "replace", "path": "/Texture", "value": "NPC/Livestock/Chicken_Variants/Speckles/Models/Texture.png" }
+        ],
+        "role": [
+          { "op": "replace", "path": "/Modify/Appearance", "value": "Chicken_Speckles" },
+          { "op": "replace", "path": "/Parameters/NameTranslationKey/Value", "value": "better_variants.npcRoles.Chicken_Speckles.name" }
+        ]
+      }
+    }
+  ]
+}

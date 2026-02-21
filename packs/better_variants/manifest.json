@@ -1,0 +1,15 @@
+{
+  "Group": "boylecraft",
+  "Name": "better_entities",
+  "Version": "0.0.1",
+  "Description": "",
+  "Authors": [],
+  "Website": "",
+  "ServerVersion": "2026.02.19-1a311a592",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "LoadBefore": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": false,
+  "SubPlugins": []
+}
