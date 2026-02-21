@@ -222,6 +222,81 @@ def _npc_path_to_mod_common_any(mod_root: Path, engine_path: str) -> Path:
     return mod_root / "Common" / Path(engine_path)
 
 
+def _scale_blockymodel_for_texture_resize(doc: Json, scale: int) -> Json:
+    """
+    When the texture image is resized by `scale`, adjust the blockymodel so
+    UVs still cover the same *logical* regions:
+      - textureLayout offsets *= scale
+      - settings.size *= scale   (UV rect sizes grow)
+      - stretch /= scale         (geometry stays same size)
+    """
+    if scale <= 1:
+        return doc
+
+    def scale_stretch_axis(v: float) -> float:
+        # preserve sign for mirrored stretches (-1 etc)
+        return v / scale
+
+    def walk(x: Json) -> None:
+        if isinstance(x, dict):
+            # 1) scale offsets in textureLayout
+            tl = x.get("textureLayout")
+            if isinstance(tl, dict):
+                for face in tl.values():
+                    if isinstance(face, dict):
+                        off = face.get("offset")
+                        if isinstance(off, dict):
+                            if isinstance(off.get("x"), (int, float)):
+                                off["x"] = off["x"] * scale
+                            if isinstance(off.get("y"), (int, float)):
+                                off["y"] = off["y"] * scale
+
+            # 2) scale UV rectangle sizes via settings.size, and neutralize via stretch
+            # This lives under a "shape" object typically.
+            if x.get("type") in ("box", "quad"):
+                settings = x.get("settings")
+                stretch = x.get("stretch")
+
+                if isinstance(settings, dict) and isinstance(settings.get("size"), dict):
+                    sz = settings["size"]
+
+                    if x["type"] == "box":
+                        # scale size x/y/z
+                        for k in ("x", "y", "z"):
+                            if isinstance(sz.get(k), (int, float)):
+                                sz[k] = sz[k] * scale
+
+                        # divide stretch x/y/z
+                        if isinstance(stretch, dict):
+                            for k in ("x", "y", "z"):
+                                if isinstance(stretch.get(k), (int, float)):
+                                    stretch[k] = scale_stretch_axis(float(stretch[k]))
+
+                    elif x["type"] == "quad":
+                        # quads have size.x, size.y only
+                        for k in ("x", "y"):
+                            if isinstance(sz.get(k), (int, float)):
+                                sz[k] = sz[k] * scale
+
+                        # divide stretch x/y so geometry stays same
+                        if isinstance(stretch, dict):
+                            for k in ("x", "y"):
+                                if isinstance(stretch.get(k), (int, float)):
+                                    stretch[k] = scale_stretch_axis(float(stretch[k]))
+                        # leave stretch.z alone (often irrelevant / used differently)
+
+            # recurse
+            for v in x.values():
+                walk(v)
+
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(doc)
+    return doc
+
+
 def _scale_blockymodel_uv_offsets(doc: Json, scale: int) -> Json:
     """
     Multiply every textureLayout.*.offset.x/y by scale.
@@ -284,7 +359,7 @@ def _generate_scaled_blockymodel_from_base_appearance(
         raise FileNotFoundError(f"Base blockymodel not found: {base_blocky_file} (from '{base_blocky_engine}')")
 
     blocky_doc = json.loads(base_blocky_file.read_text(encoding="utf-8"))
-    blocky_doc = _scale_blockymodel_uv_offsets(blocky_doc, scale)
+    blocky_doc = _scale_blockymodel_for_texture_resize(blocky_doc, scale)
 
     # Output blockymodel path: same folder as output texture
     out_tex_p = Path(out_texture_engine_path)

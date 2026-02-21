@@ -1,128 +1,97 @@
 {
-  "version": 1,
-  "server_version": "2026.02.19-1a311a592",
-  "outputs": {
-    "model_dir": "Server/Models/Livestock",
-    "role_dir": "Server/NPC/Roles/Creature/Livestock"
-  },
-  "sources": {
-    "model": {
-      "base": "Server/Models/Livestock/Chicken.json"
+    "version": 1,
+    "server_version": "2026.02.19-1a311a592",
+    "outputs": { "model_dir": "Server/Models/Livestock", "role_dir": "Server/NPC/Roles/Creature/Livestock" },
+    "sources": {
+        "model": { "base": "Server/Models/Livestock/Chicken.json" },
+        "role": { "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json" }
     },
-    "role": {
-      "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json"
-    }
-  },
-  "variants": [
-    {
-      "id": "Chicken_Bobby",
-      "patches": {
-        "model": [
-          {
-            "op": "replace",
-            "path": "/Texture",
-            "value": {
-              "$gen_texture": {
-                "from": {
-                  "$base_model_texture": true
-                },
-                "transform": [
-                  {
-                    "op": "resize",
-                    "scale": 1,
-                    "resample": "nearest"
-                  },
-                  {
-                    "op": "desaturate",
-                    "amount": 0.8,
-                    "mask": {
-                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DesaturateMask.png",
-                      "invert": false
+    "variants": [
+              {
+            "id": "Chicken_Speckles",
+            "patches": {
+                "model": [
+                    {
+                        "op": "replace",
+                        "path": "/Texture",
+                        "value": "NPC/Livestock/Chicken_Variants/Speckles/Models/Texture.png"
                     }
-                  },
-                  {
-                    "op": "tint",
-                    "rgba": [
-                      0.2,
-                      0.8,
-                      0.2,
-                      0.8
-                    ],
-                    "amount": 1.0,
-                    "mask": {
-                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
-                      "invert": false
-                    }
-                  },
-                  {
-                    "op": "tint",
-                    "rgba": [
-                      0.8,
-                      0.2,
-                      0.2,
-                      0.8
-                    ],
-                    "amount": 1.0,
-                    "mask": {
-                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
-                      "invert": true
-                    }
-                  },
-                  {
-                    "op": "opacity",
-                    "amount": 0.7,
-                    "mode": "dither",
-                    "pattern": "blue_noise",
-                    "mask": {
-                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DitherMask.png",
-                      "channel": "luma",
-                      "threshold": 0.5,
-                      "invert": false
-                    }
-                  }
                 ],
-                "out": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png"
-              }
+                "role": [
+                    { "op": "replace", "path": "/Modify/Appearance", "value": "Chicken_Speckles" },
+                    {
+                        "op": "replace",
+                        "path": "/Parameters/NameTranslationKey/Value",
+                        "value": "better_variants.npcRoles.Chicken_Speckles.name"
+                    }
+                ]
             }
-          }
-        ],
-        "role": [
-          {
-            "op": "replace",
-            "path": "/Modify/Appearance",
-            "value": "Chicken_Bobby"
-          },
-          {
-            "op": "replace",
-            "path": "/Parameters/NameTranslationKey/Value",
-            "value": "better_variants.npcRoles.Chicken_Bobby.name"
-          }
-        ]
-      }
-    },
-    {
-      "id": "Chicken_Speckles",
-      "patches": {
-        "model": [
-          {
-            "op": "replace",
-            "path": "/Texture",
-            "value": "NPC/Livestock/Chicken_Variants/Speckles/Models/Texture.png"
-          }
-        ],
-        "role": [
-          {
-            "op": "replace",
-            "path": "/Modify/Appearance",
-            "value": "Chicken_Speckles"
-          },
-          {
-            "op": "replace",
-            "path": "/Parameters/NameTranslationKey/Value",
-            "value": "better_variants.npcRoles.Chicken_Speckles.name"
-          }
-        ]
-      }
-    }
-  ]
+        },
+        {
+            "id": "Chicken_Bobby",
+            "patches": {
+                "model": [
+                    {
+                        "op": "replace",
+                        "path": "/Texture",
+                        "value": {
+                            "$gen_texture": {
+                                "from": { "$base_model_texture": true },
+                                "transform": [
+                                    { "op": "resize", "scale": 4, "resample": "nearest" },
+                                    {
+                                        "op": "desaturate",
+                                        "amount": 0.5,
+                                        "mask": {
+                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DesaturateMask.png",
+                                            "invert": false
+                                        }
+                                    },
+                                    {
+                                        "op": "tint",
+                                        "rgba": [ 0.2, 0.2, 0.2, 0.8 ],
+                                        "amount": 1,
+                                        "mask": {
+                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
+                                            "invert": false
+                                        }
+                                    },
+                                    {
+                                        "op": "tint",
+                                        "rgba": [ 0.5, 0.5, 0.0, 0.8 ],
+                                        "amount": 1,
+                                        "mask": {
+                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
+                                            "invert": true
+                                        }
+                                    },
+                                    {
+                                        "op": "opacity",
+                                        "amount": 0.45,
+                                        "mode": "dither",
+                                        "pattern": "blue_noise",
+                                        "mask": {
+                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DitherMask.png",
+                                            "channel": "luma",
+                                            "threshold": 0.5,
+                                            "invert": false
+                                        }
+                                    }
+                                ],
+                                "out": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png"
+                            }
+                        }
+                    }
+                ],
+                "role": [
+                    { "op": "replace", "path": "/Modify/Appearance", "value": "Chicken_Bobby" },
+                    {
+                        "op": "replace",
+                        "path": "/Parameters/NameTranslationKey/Value",
+                        "value": "better_variants.npcRoles.Chicken_Bobby.name"
+                    }
+                ]
+            }
+        }
+    ]
 }
