@@ -8,21 +8,21 @@
     },
     "variants": [
               {
-            "id": "Chicken_Speckles",
+            "id": "Chicken_Favorelle",
             "patches": {
                 "model": [
                     {
                         "op": "replace",
                         "path": "/Texture",
-                        "value": "NPC/Livestock/Chicken_Variants/Speckles/Models/Texture.png"
+                        "value": "NPC/Livestock/Chicken_Variants/Favorelle/Models/Texture.png"
                     }
                 ],
                 "role": [
-                    { "op": "replace", "path": "/Modify/Appearance", "value": "Chicken_Speckles" },
+                    { "op": "replace", "path": "/Modify/Appearance", "value": "Chicken_Favorelle" },
                     {
                         "op": "replace",
                         "path": "/Parameters/NameTranslationKey/Value",
-                        "value": "better_variants.npcRoles.Chicken_Speckles.name"
+                        "value": "better_variants.npcRoles.Chicken_Favorelle.name"
                     }
                 ]
             }

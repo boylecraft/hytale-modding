@@ -2,7 +2,7 @@
   "Type": "Variant",
   "Reference": "Template_Animal_Neutral",
   "Modify": {
-    "Appearance": "Chicken_Speckles",
+    "Appearance": "Chicken_Favorelle",
     "FlockArray": [
       "Chicken",
       "Chicken_Chick"
@@ -35,7 +35,7 @@
   },
   "Parameters": {
     "NameTranslationKey": {
-      "Value": "better_variants.npcRoles.Chicken_Speckles.name",
+      "Value": "better_variants.npcRoles.Chicken_Favorelle.name",
       "Description": "Translation key for NPC name display"
     }
   }

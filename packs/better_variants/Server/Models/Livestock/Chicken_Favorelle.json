@@ -1,6 +1,6 @@
 {
   "Model": "NPC/Livestock/Chicken/Models/Model.blockymodel",
-  "Texture": "NPC/Livestock/Chicken_Variants/Speckles/Models/Texture.png",
+  "Texture": "NPC/Livestock/Chicken_Variants/Favorelle/Models/Texture.png",
   "EyeHeight": 0.7,
   "CrouchOffset": -0.2,
   "HitBox": {
