@@ -12,21 +12,200 @@ from typing import Any, Dict, List, Tuple, Union, Optional
 
 Json = Union[Dict[str, Any], List[Any], str, int, float, bool, None]
 
-
 # ----------------------------
 # Image editing helpers
 # ----------------------------
 
 _BAYER8 = np.array([
-    [ 0, 48, 12, 60,  3, 51, 15, 63],
+    [0, 48, 12, 60, 3, 51, 15, 63],
     [32, 16, 44, 28, 35, 19, 47, 31],
-    [ 8, 56,  4, 52, 11, 59,  7, 55],
+    [8, 56, 4, 52, 11, 59, 7, 55],
     [40, 24, 36, 20, 43, 27, 39, 23],
-    [ 2, 50, 14, 62,  1, 49, 13, 61],
+    [2, 50, 14, 62, 1, 49, 13, 61],
     [34, 18, 46, 30, 33, 17, 45, 29],
-    [10, 58,  6, 54,  9, 57,  5, 53],
+    [10, 58, 6, 54, 9, 57, 5, 53],
     [42, 26, 38, 22, 41, 25, 37, 21],
 ], dtype=np.float32)
+
+
+def _mask_to_float01(mask_img: Image.Image, *, channel: str) -> np.ndarray:
+    """
+    Returns HxW float mask in [0,1].
+    channel: 'luma' | 'r' | 'g' | 'b' | 'a'
+    """
+    m = mask_img.convert("RGBA")
+    arr = np.asarray(m).astype(np.float32) / 255.0  # H,W,4
+
+    ch = channel.lower().strip()
+    if ch == "r":
+        return arr[..., 0]
+    if ch == "g":
+        return arr[..., 1]
+    if ch == "b":
+        return arr[..., 2]
+    if ch == "a":
+        return arr[..., 3]
+    if ch == "luma":
+        # Rec.709-ish luminance
+        return 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
+
+    raise ValueError(f"mask.channel must be one of luma/r/g/b/a, got '{channel}'")
+
+
+def _resolve_engine_path_to_file(
+        base_assets_root: Path,
+        mod_root: Path,
+        engine_path: str,
+) -> Path:
+    """
+    Prefer mask files in the mod (Common/...) if present, else fall back to base assets.
+    engine_path like 'NPC/.../Masks/Foo.png'
+    """
+    mod_file = _npc_path_to_mod_common_any(mod_root, engine_path)
+    if mod_file.exists():
+        return mod_file
+    return _npc_path_to_base_common_any(base_assets_root, engine_path)
+
+
+# def _load_mask01(
+#     *,
+#     base_assets_root: Path,
+#     mod_root: Path,
+#     mask_spec: Dict[str, Any],
+#     target_size: tuple[int, int],
+#     texture_engine_path: str,
+# ) -> np.ndarray:
+#     """
+#     Returns float mask in [0..1], shape (H,W).
+#     White=1 apply effect, Black=0 protect. Optional invert.
+#     """
+#     path = mask_spec.get("path")
+#     if not isinstance(path, str) or not path:
+#         raise ValueError("mask.path must be a non-empty string")
+#
+#     invert = bool(mask_spec.get("invert", False))
+#     channel = str(mask_spec.get("channel", "luma")).lower()  # "luma" or "alpha"
+#
+#     file_path = _resolve_engine_path_to_file(base_assets_root, mod_root, path)
+#     if not file_path.exists():
+#         raise FileNotFoundError(f"Mask not found: {file_path} (from '{path}')")
+#
+#     m = Image.open(file_path).convert("RGBA")
+#
+#     # match current working image size
+#     if m.size != target_size:
+#         m = m.resize(target_size, resample=Image.Resampling.NEAREST)
+#
+#     arr = np.asarray(m).astype(np.float32) / 255.0  # (H,W,4)
+#
+#     if channel == "alpha":
+#         mask = arr[..., 3]
+#     else:
+#         # luma from RGB
+#         mask = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
+#
+#     if invert:
+#         mask = 1.0 - mask
+#
+#     return np.clip(mask, 0.0, 1.0)
+
+
+def _apply_desaturate_masked(img: Image.Image, amount: float, mask01: np.ndarray | None) -> Image.Image:
+    amount = float(amount)
+    if amount <= 0:
+        return img
+
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.float32) / 255.0  # (H,W,4)
+
+    # grayscale luma
+    gray = (0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2])
+    gray_rgb = np.stack([gray, gray, gray], axis=-1)
+
+    if mask01 is None:
+        w = np.clip(amount, 0.0, 1.0)
+        blend = w
+    else:
+        blend = np.clip(amount, 0.0, 1.0) * mask01  # (H,W)
+
+    # blend per pixel
+    arr[..., 0:3] = arr[..., 0:3] * (1.0 - blend[..., None]) + gray_rgb * (blend[..., None])
+
+    out = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(out, mode="RGBA")
+
+
+def _apply_tint_rgba_masked(
+        img: Image.Image,
+        *,
+        rgba: tuple[float, float, float, float],
+        amount: float = 1.0,
+        mask01: np.ndarray | None,
+) -> Image.Image:
+    amount = float(amount)
+    if amount <= 0:
+        return img
+
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.float32) / 255.0
+
+    r, g, b, a = rgba
+    tinted = arr.copy()
+    tinted[..., 0] *= r
+    tinted[..., 1] *= g
+    tinted[..., 2] *= b
+    tinted[..., 3] *= a
+
+    if mask01 is None:
+        w = np.clip(amount, 0.0, 1.0)
+        blend = w
+    else:
+        blend = np.clip(amount, 0.0, 1.0) * mask01
+
+    arr = arr * (1.0 - blend[..., None]) + tinted * (blend[..., None])
+
+    out = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(out, mode="RGBA")
+
+
+def _load_mask_map(
+        *,
+        base_assets_root: Path,
+        mod_root: Path,
+        mask_spec: Dict[str, Any],
+        target_size: tuple[int, int],
+) -> np.ndarray:
+    """
+    Loads mask from engine path and returns HxW float in [0,1], resized to target_size.
+    """
+    path = mask_spec.get("path")
+    if not isinstance(path, str) or not path:
+        raise ValueError("opacity.mask.path must be a non-empty string engine path")
+
+    channel = str(mask_spec.get("channel", "luma"))
+    invert = bool(mask_spec.get("invert", False))
+
+    # Prefer mod-root mask first (lets you ship masks), else fall back to base assets
+    mod_file = _npc_path_to_mod_common_any(mod_root, path)
+    base_file = _npc_path_to_base_common_any(base_assets_root, path)
+
+    if mod_file.exists():
+        f = mod_file
+    elif base_file.exists():
+        f = base_file
+    else:
+        raise FileNotFoundError(f"Mask image not found in mod or base assets: {path}")
+
+    m = Image.open(f)
+    # IMPORTANT: resize mask to match the already-transformed texture size
+    if m.size != target_size:
+        # nearest keeps crisp regions; change to bilinear if you prefer smoother edges
+        m = m.resize(target_size, resample=Image.Resampling.NEAREST)
+
+    mm = _mask_to_float01(m, channel=channel)
+    if invert:
+        mm = 1.0 - mm
+    return np.clip(mm, 0.0, 1.0)
 
 
 def _npc_path_to_base_common_any(base_assets_root: Path, engine_path: str) -> Path:
@@ -77,12 +256,12 @@ def _scale_blockymodel_uv_offsets(doc: Json, scale: int) -> Json:
 
 
 def _generate_scaled_blockymodel_from_base_appearance(
-    *,
-    base_assets_root: Path,
-    mod_root: Path,
-    base_appearance_doc: Json,          # <-- THIS is read from cfg.sources.model.base
-    out_texture_engine_path: str,       # e.g. NPC/.../Bobby/Models/Texture.png
-    scale: int,
+        *,
+        base_assets_root: Path,
+        mod_root: Path,
+        base_appearance_doc: Json,  # <-- THIS is read from cfg.sources.model.base
+        out_texture_engine_path: str,  # e.g. NPC/.../Bobby/Models/Texture.png
+        scale: int,
 ) -> str:
     """
     Uses the base appearance JSON's "Model" field to locate the source .blockymodel,
@@ -184,7 +363,7 @@ def _bayer_threshold_map(h: int, w: int, *, size: int = 8) -> np.ndarray:
         raise ValueError("Only bayer8 implemented here")
     # (m + 0.5) / 64 gives a nicer distribution (avoids threshold=0 exact)
     mat = (_BAYER8 + 0.5) / 64.0
-    return np.tile(mat, (int(np.ceil(h/8)), int(np.ceil(w/8))))[:h, :w]
+    return np.tile(mat, (int(np.ceil(h / 8)), int(np.ceil(w / 8))))[:h, :w]
 
 
 def _clamp01(x: float) -> float:
@@ -213,13 +392,15 @@ def _bayer_matrix(n: int) -> np.ndarray:
 
 
 def _apply_opacity_dither(
-    img: Image.Image,
-    *,
-    amount: float,
-    pattern: str = "bayer8",
-    preserve_holes: bool = True,
-    seed: int = 0,
-    tile: int = 64,
+        img: Image.Image,
+        *,
+        amount: float,
+        pattern: str = "bayer8",
+        preserve_holes: bool = True,
+        seed: int = 0,
+        tile: int = 64,
+        mask_map: Optional[np.ndarray] = None,
+        mask_threshold: float = 0.5,
 ) -> Image.Image:
     """
     Converts intended opacity into cutout alpha via dithering.
@@ -253,6 +434,16 @@ def _apply_opacity_dither(
     else:
         raise ValueError(f"Unsupported dither pattern: {pattern!r} (use bayer4/bayer8/bayer16 or blue_noise)")
 
+    if mask_map is not None:
+        region = mask_map >= float(mask_threshold)
+
+        # outside region: keep pixel opaque (255) unless it was already a hole and preserve_holes
+        keep_outside = np.ones_like(keep, dtype=bool)
+        if preserve_holes:
+            keep_outside = (arr[..., 3] > 0)
+
+        keep = np.where(region, keep, keep_outside)
+
     arr[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
 
     out = arr.copy()
@@ -267,8 +458,8 @@ def _apply_opacity_dither_rgba_worked(img: Image.Image, *, amount: float, preser
 
     th = _bayer_threshold_map(h, w, size=8)  # 0..1
 
-    alpha = arr[..., 3].astype(np.float32) / 255.0
-    # coverage = np.clip(alpha * float(amount), 0.0, 1.0)
+    alph = arr[..., 3].astype(np.float32) / 255.0
+    # coverage = np.clip(alph * float(amount), 0.0, 1.0)
     coverage = np.clip(float(amount), 0.0, 1.0)
 
     keep = th < coverage
@@ -281,11 +472,11 @@ def _apply_opacity_dither_rgba_worked(img: Image.Image, *, amount: float, preser
 
 
 def _apply_opacity_dither_broke(
-    img: Image.Image,
-    *,
-    amount: float,
-    pattern: str = "bayer8",
-    preserve_holes: bool = True,
+        img: Image.Image,
+        *,
+        amount: float,
+        pattern: str = "bayer8",
+        preserve_holes: bool = True,
 ) -> Image.Image:
     """
     Converts intended opacity into cutout alpha via ordered dithering.
@@ -332,6 +523,7 @@ def _apply_opacity_dither_broke(
     out = arr.copy()
     out[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
     return Image.fromarray(out, mode="RGBA")
+
 
 def _ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -418,7 +610,34 @@ def _generate_texture(
 
     from_spec = spec.get("from")
     out_npc_path = spec.get("out")
-    transform = spec.get("transform") or {}
+    # transform = spec.get("transform") or {}
+
+    xform = spec.get("transform") or []
+    steps: list[dict[str, Any]]
+
+    if isinstance(xform, list):
+        steps = xform
+    elif isinstance(xform, dict):
+        # backward compat: convert dict -> ordered steps
+        # (pick a sensible default order)
+        order = ["desaturate", "tint", "resize", "opacity"]
+        steps = []
+        for k in order:
+            if k in xform:
+                v = xform[k]
+                if isinstance(v, dict):
+                    steps.append({"op": k, **v})
+                else:
+                    steps.append({"op": k, "value": v})
+        # include any extra keys (like tint_base) but only if they’re dicts with a recognized op
+        for k, v in xform.items():
+            if k in order:
+                continue
+            # Optional: treat keys like "tint_base" as op "tint" if you want:
+            # if k.startswith("tint") and isinstance(v, dict): steps.append({"op":"tint", **v})
+    else:
+        raise ValueError("transform must be an object or array")
+
     out_texture_engine_path = out_npc_path  # what you already return today
 
     if not isinstance(out_npc_path, str) or not out_npc_path:
@@ -458,69 +677,106 @@ def _generate_texture(
         # keep alpha if paletted-with-transparency etc
         img = img.convert("RGBA") if "A" in img.getbands() else img.convert("RGB")
 
-    # Currently supported transform: desaturate
-    if "desaturate" in transform:
-        ds = transform["desaturate"]
-        amount = ds.get("amount", 1.0) if isinstance(ds, dict) else 1.0
-        img = _apply_desaturate(img, amount)
+    # execute transforms
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ValueError("transform steps must be objects")
 
-    if "tint" in transform:
-        t = transform["tint"]
-        if not isinstance(t, dict):
-            raise ValueError("transform.tint must be an object")
+        op = step.get("op")
+        if op == "desaturate":
+            amount = step.get("amount", 1.0) if isinstance(step, dict) else 1.0
+            if isinstance(step, dict) and isinstance(step.get("mask"), dict):
+                mask01 = _load_mask_map(
+                    base_assets_root=base_assets_root,
+                    mod_root=mod_root,
+                    mask_spec=step["mask"],
+                    target_size=img.size,
+                )
+            img = _apply_desaturate_masked(img, amount, mask01)
+            # img = _apply_desaturate(img, amount)
 
-        amount = float(t.get("amount", 1.0))
+        elif op == "tint":
+            if not isinstance(step, dict):
+                raise ValueError("transform.tint must be an object")
 
-        if "rgba" in t:
-            rgba = t["rgba"]
-            if not (isinstance(rgba, list) and len(rgba) == 4):
-                raise ValueError("transform.tint.rgba must be a 4-element array")
-            rgba_t = tuple(float(x) for x in rgba)
-        elif "rgb" in t:
-            rgb = t["rgb"]
-            if not (isinstance(rgb, list) and len(rgb) == 3):
-                raise ValueError("transform.tint.rgb must be a 3-element array")
-            rgba_t = (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
+            amount = float(step.get("amount", 1.0))
+
+            if "rgba" in step:
+                rgba = step["rgba"]
+                if not (isinstance(rgba, list) and len(rgba) == 4):
+                    raise ValueError("transform.tint.rgba must be a 4-element array")
+                rgba_t = tuple(float(x) for x in rgba)
+            elif "rgb" in step:
+                rgb = step["rgb"]
+                if not (isinstance(rgb, list) and len(rgb) == 3):
+                    raise ValueError("transform.tint.rgb must be a 3-element array")
+                rgba_t = (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
+            else:
+                raise ValueError("transform.tint requires 'rgb' or 'rgba'")
+
+            mask01 = None
+            if isinstance(step.get("mask"), dict):
+                mask01 = _load_mask_map(
+                    base_assets_root=base_assets_root,
+                    mod_root=mod_root,
+                    mask_spec=step["mask"],
+                    target_size=img.size,
+                )
+
+            img = _apply_tint_rgba_masked(img, rgba=rgba_t, amount=amount, mask01=mask01)
+
+        elif op == "resize":
+            if not isinstance(step, dict):
+                raise ValueError("transform.resize must be an object")
+            scale = int(step.get("scale", 1))
+            resample = str(step.get("resample", "nearest")).lower()
+            img = _apply_resize(img, scale=scale, resample=resample)
+            scale_used = scale
+
+        elif op == "opacity":
+            if not isinstance(step, dict):
+                raise ValueError("transform.opacity must be an object")
+            op_amount = float(step.get("amount", 1.0))
+            mode = str(step.get("mode", "dither")).lower()
+            pattern = str(step.get("pattern", "bayer8"))
+            preserve_holes = bool(step.get("preserve_holes", True))
+
+            if mode in ("dither", "mask", "cutout"):
+                seed = int(step.get("seed", 0))
+                tile = int(step.get("tile", 64))
+                mask_map = None
+                mask_threshold = 0.5
+
+                mask_spec = step.get("mask")
+                if mask_spec is not None:
+                    if not isinstance(mask_spec, dict):
+                        raise ValueError("opacity.mask must be an object")
+                    mask_threshold = float(mask_spec.get("threshold", 0.5))
+                    mask_map = _load_mask_map(
+                        base_assets_root=base_assets_root,
+                        mod_root=mod_root,
+                        mask_spec=mask_spec,
+                        target_size=img.size,
+                    )
+
+                img = _apply_opacity_dither(
+                    img,
+                    amount=op_amount,
+                    pattern=pattern,
+                    preserve_holes=preserve_holes,
+                    seed=seed,
+                    tile=tile,
+                    mask_map=mask_map,
+                    mask_threshold=mask_threshold,
+                )
+
+            elif mode in ("none", "keep"):
+                pass
+            else:
+                raise ValueError(f"Unsupported opacity mode: {mode!r}")
+
         else:
-            raise ValueError("transform.tint requires 'rgb' or 'rgba'")
-
-        img = _apply_tint_rgba(img, rgba=rgba_t, amount=amount)
-
-    # Resize (do this BEFORE opacity/dither so holes get smaller)
-    if "resize" in transform:
-        r = transform["resize"]
-        if not isinstance(r, dict):
-            raise ValueError("transform.resize must be an object")
-        scale = int(r.get("scale", 1))
-        resample = str(r.get("resample", "nearest")).lower()
-        img = _apply_resize(img, scale=scale, resample=resample)
-        scale_used = scale
-
-    if "opacity" in transform:
-        o = transform["opacity"]
-        if not isinstance(o, dict):
-            raise ValueError("transform.opacity must be an object")
-        op_amount = float(o.get("amount", 1.0))
-        mode = str(o.get("mode", "dither")).lower()
-        pattern = str(o.get("pattern", "bayer8"))
-        preserve_holes = bool(o.get("preserve_holes", True))
-
-        if mode in ("dither", "mask", "cutout"):
-            seed = int(o.get("seed", 0))
-            tile = int(o.get("tile", 64))
-            img = _apply_opacity_dither(
-                img,
-                amount=op_amount,
-                pattern=pattern,
-                preserve_holes=preserve_holes,
-                seed=seed,
-                tile=tile,
-            )
-
-        elif mode in ("none", "keep"):
-            pass
-        else:
-            raise ValueError(f"Unsupported opacity mode: {mode!r}")
+            raise ValueError(f"Unknown transform op: {op!r}")
 
     # Save
     img.save(out_file, format="PNG")
@@ -884,7 +1140,7 @@ if __name__ == "__main__":
     if not os.path.exists(texture):
         print(f"{texture} not exists")
 
-    img = Image.open(texture).convert("RGBA")
-    a = np.asarray(img)[..., 3]
-    print("alpha==0:", (a == 0).sum(), " / ", a.size)
-    print("alpha unique:", np.unique(a)[:20], "...")
+    tex_img = Image.open(texture).convert("RGBA")
+    alpha = np.asarray(tex_img)[..., 3]
+    print("alpha==0:", (alpha == 0).sum(), " / ", alpha.size)
+    print("alpha unique:", np.unique(alpha)[:20], "...")

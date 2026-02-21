@@ -26,26 +26,61 @@
                 "from": {
                   "$base_model_texture": true
                 },
-                "transform": {
-                  "resize": { "scale": 4, "resample": "nearest" },
-                  "desaturate": {
-                    "amount": 0.3
+                "transform": [
+                  {
+                    "op": "resize",
+                    "scale": 1,
+                    "resample": "nearest"
                   },
-                  "tint": {
+                  {
+                    "op": "desaturate",
+                    "amount": 0.8,
+                    "mask": {
+                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DesaturateMask.png",
+                      "invert": false
+                    }
+                  },
+                  {
+                    "op": "tint",
                     "rgba": [
-                      0.3,
-                      0.3,
-                      0.3,
-                      0.80
+                      0.2,
+                      0.8,
+                      0.2,
+                      0.8
                     ],
-                    "amount": 1.0
+                    "amount": 1.0,
+                    "mask": {
+                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
+                      "invert": false
+                    }
                   },
-                  "opacity": {
-                    "amount": 0.80,
+                  {
+                    "op": "tint",
+                    "rgba": [
+                      0.8,
+                      0.2,
+                      0.2,
+                      0.8
+                    ],
+                    "amount": 1.0,
+                    "mask": {
+                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
+                      "invert": true
+                    }
+                  },
+                  {
+                    "op": "opacity",
+                    "amount": 0.7,
                     "mode": "dither",
-                    "pattern": "blue_noise"
+                    "pattern": "blue_noise",
+                    "mask": {
+                      "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DitherMask.png",
+                      "channel": "luma",
+                      "threshold": 0.5,
+                      "invert": false
+                    }
                   }
-                },
+                ],
                 "out": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png"
               }
             }
