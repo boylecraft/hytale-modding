@@ -692,26 +692,8 @@ def _generate_texture(
 
     if isinstance(xform, list):
         steps = xform
-    elif isinstance(xform, dict):
-        # backward compat: convert dict -> ordered steps
-        # (pick a sensible default order)
-        order = ["desaturate", "tint", "resize", "opacity"]
-        steps = []
-        for k in order:
-            if k in xform:
-                v = xform[k]
-                if isinstance(v, dict):
-                    steps.append({"op": k, **v})
-                else:
-                    steps.append({"op": k, "value": v})
-        # include any extra keys (like tint_base) but only if they’re dicts with a recognized op
-        for k, v in xform.items():
-            if k in order:
-                continue
-            # Optional: treat keys like "tint_base" as op "tint" if you want:
-            # if k.startswith("tint") and isinstance(v, dict): steps.append({"op":"tint", **v})
     else:
-        raise ValueError("transform must be an object or array")
+        raise ValueError("transform must be an an array of transforms")
 
     out_texture_engine_path = out_npc_path  # what you already return today
 
@@ -760,6 +742,7 @@ def _generate_texture(
         op = step.get("op")
         if op == "desaturate":
             amount = step.get("amount", 1.0) if isinstance(step, dict) else 1.0
+            mask01 = None
             if isinstance(step, dict) and isinstance(step.get("mask"), dict):
                 mask01 = _load_mask_map(
                     base_assets_root=base_assets_root,
