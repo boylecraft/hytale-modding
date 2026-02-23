@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 import argparse
 import json
@@ -26,6 +26,187 @@ _BAYER8 = np.array([
     [10, 58, 6, 54, 9, 57, 5, 53],
     [42, 26, 38, 22, 41, 25, 37, 21],
 ], dtype=np.float32)
+
+
+def _mask01_from_alpha(img: Image.Image) -> np.ndarray:
+    """
+    White(1)=opaque region, Black(0)=transparent region based on image alpha>0.
+    Returns float mask HxW in [0,1].
+    """
+    base = img.convert("RGBA")
+    a = np.asarray(base)[..., 3].astype(np.uint8)
+    m = (a > 0).astype(np.float32)
+    return m
+
+
+def _dilate_binary_mask01(mask01: np.ndarray, *, radius_px: int) -> np.ndarray:
+    """
+    Binary dilation on a 0/1 float mask using Pillow MaxFilter.
+    radius_px=1 means a 3x3 neighborhood.
+    """
+    r = int(radius_px)
+    if r <= 0:
+        return mask01
+
+    # MaxFilter expects odd kernel size
+    k = 2 * r + 1
+    im = Image.fromarray((np.clip(mask01, 0, 1) * 255).astype(np.uint8), mode="L")
+    im = im.filter(ImageFilter.MaxFilter(size=k))
+    out = (np.asarray(im).astype(np.float32) / 255.0)
+    # keep binary-ish
+    return (out >= 0.5).astype(np.float32)
+
+
+def _erode_binary_mask01(mask01: np.ndarray, *, radius_px: int) -> np.ndarray:
+    """
+    Binary erosion on a 0/1 float mask using Pillow MinFilter.
+    """
+    r = int(radius_px)
+    if r <= 0:
+        return mask01
+
+    k = 2 * r + 1
+    im = Image.fromarray((np.clip(mask01, 0, 1) * 255).astype(np.uint8), mode="L")
+    im = im.filter(ImageFilter.MinFilter(size=k))
+    out = (np.asarray(im).astype(np.float32) / 255.0)
+    return (out >= 0.5).astype(np.float32)
+
+
+def _outline_from_mask01(mask01: np.ndarray, *, thickness_px: int) -> np.ndarray:
+    """
+    Returns a border mask: dilated(mask) - eroded(mask).
+    Thickness is controlled by radius in pixels.
+    """
+    t = int(thickness_px)
+    if t <= 0:
+        return np.zeros_like(mask01, dtype=np.float32)
+
+    dil = _dilate_binary_mask01(mask01, radius_px=t)
+    ero = _erode_binary_mask01(mask01, radius_px=t)
+    out = np.clip(dil - ero, 0.0, 1.0).astype(np.float32)
+    return out
+
+
+def _save_mask01_png(mask01: np.ndarray, out_file: Path) -> None:
+    """
+    Writes mask as L8 PNG: white=1, black=0.
+    """
+    _ensure_parent_dir(out_file)
+    im = Image.fromarray((np.clip(mask01, 0, 1) * 255).astype(np.uint8), mode="L")
+    im.save(out_file, format="PNG")
+
+
+def _mask_ensure_size(mask01: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
+    """Nearest-resize a float mask to target_size if needed."""
+    h, w = target_size[1], target_size[0]  # PIL size is (W,H)
+    if mask01.shape == (h, w):
+        return mask01
+    m = Image.fromarray((np.clip(mask01, 0.0, 1.0) * 255).astype(np.uint8), mode="L")
+    m = m.resize((w, h), resample=Image.Resampling.NEAREST)
+    return np.asarray(m).astype(np.float32) / 255.0
+
+
+def _mask_eval_expr(
+        expr: dict[str, Any],
+        *,
+        mask_registry: dict[str, np.ndarray],
+        target_size: tuple[int, int],
+) -> np.ndarray:
+    """
+    Evaluate a mask expression into a float mask01 in [0..1] at target_size.
+    Supported:
+      - {"$ref":"MaskId"}
+      - {"op":"not","input": <expr>}
+      - {"op":"and"/"or"/"xor","inputs":[<expr>,...]}
+      - {"op":"add"/"mul","inputs":[...]}   (numeric combine, then clamp)
+      - {"op":"max"/"min","inputs":[...]}   (fuzzy combine)
+      - {"op":"threshold","input":<expr>,"value":0.5}  (returns 0/1)
+      - {"op":"scale","input":<expr>,"value":0.8}      (multiply)
+    """
+    if not isinstance(expr, dict):
+        raise ValueError("mask expr must be an object")
+
+    if "$ref" in expr:
+        mid = expr["$ref"]
+        if not isinstance(mid, str) or not mid:
+            raise ValueError("mask $ref must be non-empty string")
+        if mid not in mask_registry:
+            raise KeyError(f"mask $ref not found in registry: {mid!r}")
+        return _mask_ensure_size(mask_registry[mid], target_size)
+
+    op = expr.get("op")
+    if not isinstance(op, str) or not op:
+        raise ValueError("mask expr missing 'op'")
+
+    op = op.lower().strip()
+
+    if op == "not":
+        inner = _mask_eval_expr(expr["input"], mask_registry=mask_registry, target_size=target_size)
+        return 1.0 - inner
+
+    if op in ("and", "or", "xor", "add", "mul", "max", "min"):
+        inputs = expr.get("inputs")
+        if not isinstance(inputs, list) or not inputs:
+            raise ValueError(f"mask expr op {op!r} requires non-empty inputs[]")
+
+        mats = [_mask_eval_expr(e, mask_registry=mask_registry, target_size=target_size) for e in inputs]
+
+        if op == "and":
+            # boolean-ish: min = intersection
+            out = mats[0]
+            for m in mats[1:]:
+                out = np.minimum(out, m)
+            return out
+
+        if op == "or":
+            # boolean-ish: max = union
+            out = mats[0]
+            for m in mats[1:]:
+                out = np.maximum(out, m)
+            return out
+
+        if op == "xor":
+            # threshold to boolean then xor
+            b = (mats[0] >= 0.5)
+            for m in mats[1:]:
+                b = np.logical_xor(b, (m >= 0.5))
+            return b.astype(np.float32)
+
+        if op == "add":
+            out = np.zeros_like(mats[0], dtype=np.float32)
+            for m in mats:
+                out = out + m
+            return np.clip(out, 0.0, 1.0)
+
+        if op == "mul":
+            out = np.ones_like(mats[0], dtype=np.float32)
+            for m in mats:
+                out = out * m
+            return np.clip(out, 0.0, 1.0)
+
+        if op == "max":
+            out = mats[0]
+            for m in mats[1:]:
+                out = np.maximum(out, m)
+            return out
+
+        if op == "min":
+            out = mats[0]
+            for m in mats[1:]:
+                out = np.minimum(out, m)
+            return out
+
+    if op == "threshold":
+        inner = _mask_eval_expr(expr["input"], mask_registry=mask_registry, target_size=target_size)
+        th = float(expr.get("value", 0.5))
+        return (inner >= th).astype(np.float32)
+
+    if op == "scale":
+        inner = _mask_eval_expr(expr["input"], mask_registry=mask_registry, target_size=target_size)
+        v = float(expr.get("value", 1.0))
+        return np.clip(inner * v, 0.0, 1.0)
+
+    raise ValueError(f"Unknown mask expr op: {op!r}")
 
 
 def _mask_to_float01(mask_img: Image.Image, *, channel: str) -> np.ndarray:
@@ -67,47 +248,201 @@ def _resolve_engine_path_to_file(
     return _npc_path_to_base_common_any(base_assets_root, engine_path)
 
 
-# def _load_mask01(
-#     *,
-#     base_assets_root: Path,
-#     mod_root: Path,
-#     mask_spec: Dict[str, Any],
-#     target_size: tuple[int, int],
-#     texture_engine_path: str,
-# ) -> np.ndarray:
-#     """
-#     Returns float mask in [0..1], shape (H,W).
-#     White=1 apply effect, Black=0 protect. Optional invert.
-#     """
-#     path = mask_spec.get("path")
-#     if not isinstance(path, str) or not path:
-#         raise ValueError("mask.path must be a non-empty string")
-#
-#     invert = bool(mask_spec.get("invert", False))
-#     channel = str(mask_spec.get("channel", "luma")).lower()  # "luma" or "alpha"
-#
-#     file_path = _resolve_engine_path_to_file(base_assets_root, mod_root, path)
-#     if not file_path.exists():
-#         raise FileNotFoundError(f"Mask not found: {file_path} (from '{path}')")
-#
-#     m = Image.open(file_path).convert("RGBA")
-#
-#     # match current working image size
-#     if m.size != target_size:
-#         m = m.resize(target_size, resample=Image.Resampling.NEAREST)
-#
-#     arr = np.asarray(m).astype(np.float32) / 255.0  # (H,W,4)
-#
-#     if channel == "alpha":
-#         mask = arr[..., 3]
-#     else:
-#         # luma from RGB
-#         mask = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
-#
-#     if invert:
-#         mask = 1.0 - mask
-#
-#     return np.clip(mask, 0.0, 1.0)
+def _mask_registry_save(
+    mask_registry: Dict[str, np.ndarray],
+    mask_id: str,
+    out_texture_file: Path,
+    mask01: Optional[np.ndarray] = None,
+    *,
+    filename: Optional[str] = None,
+) -> Path:
+    """
+    Save a registry mask to disk next to the output texture.
+
+    - out_texture_file: the REAL file path for the generated texture (mod_root/Common/.../Texture.png)
+    - mask_id: registry key (used for default filename)
+    - mask01: optionally pass the mask directly (else pulled from registry)
+    - filename: optionally override output filename (e.g. "OutlineMask.png")
+
+    Returns the file path written.
+    """
+    if mask01 is None:
+        if mask_id not in mask_registry:
+            raise KeyError(f"_mask_registry_save: mask_id not in registry: {mask_id!r}")
+        mask01 = mask_registry[mask_id]
+
+    if not isinstance(mask01, np.ndarray):
+        raise TypeError(f"_mask_registry_save: mask {mask_id!r} is not a numpy array")
+
+    # Default output name: "<mask_id>.png" next to Texture.png
+    if filename is None:
+        filename = f"{mask_id}.png"
+
+    out_mask_file = out_texture_file.parent / filename
+    _save_mask01_png(mask01.astype(np.float32), out_mask_file)
+    return out_mask_file
+
+
+def _iter_shapes(blocky_doc: Json) -> list[dict[str, Any]]:
+    shapes: list[dict[str, Any]] = []
+
+    def walk(x: Json) -> None:
+        if isinstance(x, dict):
+            # In blockymodel, shapes typically live under node["shape"]
+            if "shape" in x and isinstance(x["shape"], dict):
+                shapes.append(x["shape"])
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(blocky_doc)
+    return shapes
+
+
+def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, int]]:
+    """
+    Returns list of UV rects (x,y,w,h) for this shape in texture pixel coords.
+    Handles box + quad.
+    Ignores rotation/mirror because for rect bounds we only need w/h (but angle swaps w/h).
+    """
+    tl = shape.get("textureLayout")
+    settings = shape.get("settings")
+    typ = shape.get("type")
+
+    if not isinstance(tl, dict) or not isinstance(settings, dict):
+        return []
+
+    size = settings.get("size")
+    if not isinstance(size, dict):
+        return []
+
+    rects: list[tuple[int, int, int, int]] = []
+
+    def wh_for_face(face: str) -> tuple[int, int] | None:
+        if typ == "box":
+            sx = size.get("x")
+            sy = size.get("y")
+            sz = size.get("z")
+            if not all(isinstance(v, (int, float)) for v in (sx, sy, sz)):
+                return None
+            sx = int(round(sx))
+            sy = int(round(sy))
+            sz = int(round(sz))
+
+            # Standard cube UV sizing
+            if face in ("top", "bottom"):
+                return (sx, sz)
+            if face in ("front", "back"):
+                return (sx, sy)
+            if face in ("left", "right"):
+                return (sz, sy)
+            return None
+
+        if typ == "quad":
+            sx = size.get("x")
+            sy = size.get("y")
+            if not all(isinstance(v, (int, float)) for v in (sx, sy)):
+                return None
+            return (int(round(sx)), int(round(sy)))
+
+        return None
+
+    for face_name, face in tl.items():
+        if not isinstance(face, dict):
+            continue
+        off = face.get("offset")
+        if not isinstance(off, dict):
+            continue
+        ox = off.get("x")
+        oy = off.get("y")
+        if not isinstance(ox, (int, float)) or not isinstance(oy, (int, float)):
+            continue
+
+        wh = wh_for_face(face_name)
+        if wh is None:
+            continue
+        w, h = wh
+
+        # If face is rotated 90/270, swap w/h
+        angle = face.get("angle", 0)
+        if isinstance(angle, (int, float)):
+            a = int(angle) % 360
+            if a in (90, 270):
+                w, h = h, w
+
+        rects.append((int(round(ox)), int(round(oy)), w, h))
+
+    return rects
+
+
+def _uv_face_rects_from_blockymodel(blocky_doc: Json) -> list[tuple[int, int, int, int]]:
+    if not isinstance(blocky_doc, dict):
+        return []
+    rects: list[tuple[int, int, int, int]] = []
+    for shape in _iter_shapes(blocky_doc):
+        if isinstance(shape, dict):
+            rects.extend(_face_rects_from_shape(shape))
+    return rects
+
+
+def _outline_mask_from_uv_faces(
+        img: Image.Image,
+        *,
+        uv_rects: list[tuple[int, int, int, int]],
+        thickness_px: int,
+        margin_px: int,
+        alpha_threshold: int = 1,
+) -> np.ndarray:
+    """
+    Produces an outline mask limited to per-face UV rectangles.
+    - thickness_px: border thickness in pixels (in current img resolution)
+    - margin_px: keep this many pixels clear from the UV rect boundary (prevents seam outlines)
+    """
+    base = img.convert("RGBA")
+    arr = np.asarray(base).astype(np.uint8)
+    H, W = arr.shape[0], arr.shape[1]
+    alpha = arr[..., 3]
+
+    out = np.zeros((H, W), dtype=np.float32)
+
+    t = int(thickness_px)
+    m = int(margin_px)
+    if t <= 0:
+        return out
+
+    for (x, y, w, h) in uv_rects:
+        # clamp rect to image bounds
+        x0 = max(0, x)
+        y0 = max(0, y)
+        x1 = min(W, x + w)
+        y1 = min(H, y + h)
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        # inset to avoid touching the UV border
+        ix0 = x0 + m
+        iy0 = y0 + m
+        ix1 = x1 - m
+        iy1 = y1 - m
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+
+        a_crop = alpha[iy0:iy1, ix0:ix1]
+        if not np.any(a_crop >= alpha_threshold):
+            continue
+
+        # binary alpha mask within this inset rect
+        mask01 = (a_crop >= alpha_threshold).astype(np.float32)
+
+        # outline inside this region
+        outline01 = _outline_from_mask01(mask01, thickness_px=t)
+
+        # safety: also ensure we never draw into the margin area (already inset, but keep strict)
+        out[iy0:iy1, ix0:ix1] = np.maximum(out[iy0:iy1, ix0:ix1], outline01)
+
+    return out
 
 
 def _apply_desaturate_masked(img: Image.Image, amount: float, mask01: np.ndarray | None) -> Image.Image:
@@ -174,18 +509,47 @@ def _load_mask_map(
         mod_root: Path,
         mask_spec: Dict[str, Any],
         target_size: tuple[int, int],
+        mask_registry: Optional[Dict[str, np.ndarray]] = None,
 ) -> np.ndarray:
     """
-    Loads mask from engine path and returns HxW float in [0,1], resized to target_size.
+    Loads mask and returns HxW float in [0,1], resized to target_size.
+
+    Supports:
+      - {"$ref": "some_id"}  -> fetch from mask_registry
+      - {"path": "...", ...} -> load from file (existing behavior)
     """
+    # --- registry ref path ---
+    ref = mask_spec.get("$ref")
+    if isinstance(ref, str) and ref:
+        if mask_registry is None:
+            raise ValueError("mask_spec uses $ref but mask_registry is None")
+        if ref not in mask_registry:
+            raise KeyError(f"mask_registry missing ref: {ref!r}")
+        mm = mask_registry[ref]
+        if not isinstance(mm, np.ndarray):
+            raise TypeError(f"mask_registry[{ref!r}] is not a numpy array")
+
+        # Ensure correct shape (H,W) for current img.size (W,H)
+        w, h = target_size
+        if mm.shape != (h, w):
+            # Nearest resize for crisp masks
+            im = Image.fromarray(np.clip(mm * 255.0, 0, 255).astype(np.uint8), mode="L")
+            im = im.resize((w, h), resample=Image.Resampling.NEAREST)
+            mm = (np.asarray(im).astype(np.float32) / 255.0)
+
+        invert = bool(mask_spec.get("invert", False))
+        if invert:
+            mm = 1.0 - mm
+        return np.clip(mm, 0.0, 1.0)
+
+    # --- file path path (existing behavior) ---
     path = mask_spec.get("path")
     if not isinstance(path, str) or not path:
-        raise ValueError("opacity.mask.path must be a non-empty string engine path")
+        raise ValueError("mask.path must be a non-empty string engine path (or use $ref)")
 
     channel = str(mask_spec.get("channel", "luma"))
     invert = bool(mask_spec.get("invert", False))
 
-    # Prefer mod-root mask first (lets you ship masks), else fall back to base assets
     mod_file = _npc_path_to_mod_common_any(mod_root, path)
     base_file = _npc_path_to_base_common_any(base_assets_root, path)
 
@@ -197,9 +561,7 @@ def _load_mask_map(
         raise FileNotFoundError(f"Mask image not found in mod or base assets: {path}")
 
     m = Image.open(f)
-    # IMPORTANT: resize mask to match the already-transformed texture size
     if m.size != target_size:
-        # nearest keeps crisp regions; change to bilinear if you prefer smoother edges
         m = m.resize(target_size, resample=Image.Resampling.NEAREST)
 
     mm = _mask_to_float01(m, channel=channel)
@@ -685,16 +1047,13 @@ def _generate_texture(
 
     from_spec = spec.get("from")
     out_npc_path = spec.get("out")
-    # transform = spec.get("transform") or {}
 
     xform = spec.get("transform") or []
-    steps: list[dict[str, Any]]
+    if not isinstance(xform, list):
+        raise ValueError("transform must be an array of steps (dict support removed)")
+    steps: list[dict[str, Any]] = xform
 
-    if isinstance(xform, list):
-        steps = xform
-    else:
-        raise ValueError("transform must be an an array of transforms")
-
+    mask_registry: Dict[str, np.ndarray] = {}
     out_texture_engine_path = out_npc_path  # what you already return today
 
     if not isinstance(out_npc_path, str) or not out_npc_path:
@@ -726,6 +1085,17 @@ def _generate_texture(
     out_file = _npc_path_to_common_file(mod_root, out_npc_path)
     _ensure_parent_dir(out_file)
 
+    # ---- load base blockymodel once (for UV-driven masks) ----
+    blocky_doc_base: Json | None = None
+    current_tex_scale = 1
+
+    if isinstance(base_model_doc, dict):
+        base_blocky_engine = base_model_doc.get("Model")
+        if isinstance(base_blocky_engine, str) and base_blocky_engine:
+            base_blocky_file = _npc_path_to_base_common_any(base_assets_root, base_blocky_engine)
+            if base_blocky_file.exists():
+                blocky_doc_base = json.loads(base_blocky_file.read_text(encoding="utf-8"))
+
     # Load + transform
     img = Image.open(in_file)
 
@@ -741,22 +1111,35 @@ def _generate_texture(
 
         op = step.get("op")
         if op == "desaturate":
-            amount = step.get("amount", 1.0) if isinstance(step, dict) else 1.0
+            amount = float(step.get("amount", 1.0))
             mask01 = None
-            if isinstance(step, dict) and isinstance(step.get("mask"), dict):
+            if isinstance(step.get("mask"), dict):
                 mask01 = _load_mask_map(
                     base_assets_root=base_assets_root,
                     mod_root=mod_root,
                     mask_spec=step["mask"],
                     target_size=img.size,
+                    mask_registry=mask_registry,  # <-- NEW
                 )
             img = _apply_desaturate_masked(img, amount, mask01)
-            # img = _apply_desaturate(img, amount)
+
+        elif op == "mask_combine":
+            mid = step.get("id")
+            if not isinstance(mid, str) or not mid:
+                raise ValueError("mask_combine requires non-empty 'id'")
+
+            expr = step.get("expr")
+            if not isinstance(expr, dict):
+                raise ValueError("mask_combine requires 'expr' object")
+
+            mask01 = _mask_eval_expr(expr, mask_registry=mask_registry, target_size=img.size)
+            mask_registry[mid] = mask01
+
+            if bool(step.get("save", False)):
+                # assuming you already have a helper to save masks in same folder as texture output
+                _mask_registry_save(mask_registry, mid, out_file, mask01)
 
         elif op == "tint":
-            if not isinstance(step, dict):
-                raise ValueError("transform.tint must be an object")
-
             amount = float(step.get("amount", 1.0))
 
             if "rgba" in step:
@@ -779,21 +1162,99 @@ def _generate_texture(
                     mod_root=mod_root,
                     mask_spec=step["mask"],
                     target_size=img.size,
+                    mask_registry=mask_registry,  # <-- NEW
                 )
 
             img = _apply_tint_rgba_masked(img, rgba=rgba_t, amount=amount, mask01=mask01)
 
         elif op == "resize":
-            if not isinstance(step, dict):
-                raise ValueError("transform.resize must be an object")
             scale = int(step.get("scale", 1))
             resample = str(step.get("resample", "nearest")).lower()
             img = _apply_resize(img, scale=scale, resample=resample)
             scale_used = scale
+            current_tex_scale *= scale
+
+        elif op == "mask":
+            """
+            Generates a mask at the CURRENT img.size and stores it in mask_registry.
+            Optionally saves a PNG next to the output texture (or to an engine path).
+            """
+            if not isinstance(step, dict):
+                raise ValueError("transform.mask must be an object")
+
+            mask_id = step.get("id")
+            if not isinstance(mask_id, str) or not mask_id:
+                raise ValueError("transform.mask.id must be a non-empty string")
+
+            mode = str(step.get("mode", "alpha")).lower()
+            invert = bool(step.get("invert", False))
+
+            # Where to derive the mask from
+            if mode == "alpha":
+                mask01 = _mask01_from_alpha(img)
+            elif mode == "outline_uv_faces":
+                if blocky_doc_base is None:
+                    raise ValueError("mask.mode='outline_uv_faces' requires base_model_doc['Model'] to exist and load")
+
+                thickness = int(step.get("thickness", 1))
+                margin = int(step.get("margin", 1))
+
+                # scale the blockymodel UVs to match the CURRENT img size (important!)
+                blocky_doc_scaled = json.loads(json.dumps(blocky_doc_base))
+                if current_tex_scale > 1:
+                    blocky_doc_scaled = _scale_blockymodel_for_texture_resize(blocky_doc_scaled, current_tex_scale)
+
+                uv_rects = _uv_face_rects_from_blockymodel(blocky_doc_scaled)
+
+                mask01 = _outline_mask_from_uv_faces(
+                    img,
+                    uv_rects=uv_rects,
+                    thickness_px=thickness,
+                    margin_px=margin,
+                    alpha_threshold=int(step.get("alpha_threshold", 1)),
+                )
+
+            elif mode == "outline":
+                thickness = int(step.get("thickness", 1))
+                base01 = _mask01_from_alpha(img)
+                mask01 = _outline_from_mask01(base01, thickness_px=thickness)
+
+            elif mode == "from_mask":
+                # Load a mask image (path/$ref/etc) and store it under a new id
+                src = step.get("src")
+                if not isinstance(src, dict):
+                    raise ValueError("transform.mask.mode='from_mask' requires src:{...}")
+                mask01 = _load_mask_map(
+                    base_assets_root=base_assets_root,
+                    mod_root=mod_root,
+                    mask_spec=src,
+                    target_size=img.size,
+                    mask_registry=mask_registry,
+                )
+
+            else:
+                raise ValueError(f"Unknown mask mode: {mode!r} (use alpha/outline/from_mask)")
+
+            if invert:
+                mask01 = 1.0 - mask01
+
+            mask01 = np.clip(mask01, 0.0, 1.0).astype(np.float32)
+            mask_registry[mask_id] = mask01
+
+            # Optional: save out a debug PNG
+            save_engine_path = step.get("save")
+            if isinstance(save_engine_path, str) and save_engine_path:
+                # Save to explicit engine path (preferred for repeatability)
+                out_mask_file = _npc_path_to_mod_common_any(mod_root, save_engine_path)
+                _save_mask01_png(mask01, out_mask_file)
+            elif step.get("save") is True:
+                # Save next to the output texture as <id>.png
+                out_tex_p = Path(out_texture_engine_path)
+                out_mask_engine = str(out_tex_p.parent / f"{mask_id}.png").replace("\\", "/")
+                out_mask_file = _npc_path_to_mod_common_any(mod_root, out_mask_engine)
+                _save_mask01_png(mask01, out_mask_file)
 
         elif op == "opacity":
-            if not isinstance(step, dict):
-                raise ValueError("transform.opacity must be an object")
             op_amount = float(step.get("amount", 1.0))
             mode = str(step.get("mode", "dither")).lower()
             pattern = str(step.get("pattern", "bayer8"))
@@ -809,13 +1270,35 @@ def _generate_texture(
                 if mask_spec is not None:
                     if not isinstance(mask_spec, dict):
                         raise ValueError("opacity.mask must be an object")
+
                     mask_threshold = float(mask_spec.get("threshold", 0.5))
-                    mask_map = _load_mask_map(
-                        base_assets_root=base_assets_root,
-                        mod_root=mod_root,
-                        mask_spec=mask_spec,
-                        target_size=img.size,
-                    )
+
+                    if "$ref" in mask_spec:
+                        mid = mask_spec["$ref"]
+                        if not isinstance(mid, str) or not mid:
+                            raise ValueError("opacity.mask.$ref must be non-empty string")
+                        if mid not in mask_registry:
+                            raise KeyError(f"opacity.mask.$ref not found: {mid!r}")
+                        mask_map = _mask_ensure_size(mask_registry[mid], img.size)
+
+                    elif "expr" in mask_spec:
+                        expr = mask_spec["expr"]
+                        if not isinstance(expr, dict):
+                            raise ValueError("opacity.mask.expr must be an object")
+                        mask_map = _mask_eval_expr(expr, mask_registry=mask_registry, target_size=img.size)
+
+                    elif "path" in mask_spec:
+                        mask_map = _load_mask_map(
+                            base_assets_root=base_assets_root,
+                            mod_root=mod_root,
+                            mask_spec=mask_spec,
+                            target_size=img.size,
+                        )
+                    else:
+                        raise ValueError("opacity.mask must have $ref, expr, or path")
+
+                if bool(mask_spec.get("invert", False)) and mask_map is not None:
+                    mask_map = 1.0 - mask_map
 
                 img = _apply_opacity_dither(
                     img,
@@ -827,7 +1310,6 @@ def _generate_texture(
                     mask_map=mask_map,
                     mask_threshold=mask_threshold,
                 )
-
             elif mode in ("none", "keep"):
                 pass
             else:
@@ -835,7 +1317,6 @@ def _generate_texture(
 
         else:
             raise ValueError(f"Unknown transform op: {op!r}")
-
     # Save
     img.save(out_file, format="PNG")
 

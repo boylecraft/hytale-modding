@@ -422,5 +422,18 @@
         }
       ]
     }
-  }
+  },
+  "Particles": [
+    {
+      "Color": "#999933",
+      "SystemId": "Candle_Fire",
+      "Scale": 2,
+      "RotationOffset": {
+        "Pitch": 0
+      },
+      "PositionOffset": {
+        "Y": 0.2
+      }
+    }
+  ]
 }

@@ -7,7 +7,7 @@
         "role": { "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json" }
     },
     "variants": [
-              {
+        {
             "id": "Chicken_Favorelle",
             "patches": {
                 "model": [
@@ -32,6 +32,19 @@
             "patches": {
                 "model": [
                     {
+                        "op": "add",
+                        "path": "/Particles",
+                        "value": [
+                            {
+                                "Color": "#999933",
+                                "SystemId": "Candle_Fire",
+                                "Scale": 2,
+                                "RotationOffset": { "Pitch": 0 },
+                                "PositionOffset": { "Y": 0.2 }
+                            }
+                        ]
+                    },
+                    {
                         "op": "replace",
                         "path": "/Texture",
                         "value": {
@@ -40,38 +53,63 @@
                                 "transform": [
                                     { "op": "resize", "scale": 4, "resample": "nearest" },
                                     {
-                                        "op": "desaturate",
-                                        "amount": 0.5,
-                                        "mask": {
-                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DesaturateMask.png",
+                                        "op": "mask",
+                                        "id": "EyeMask",
+                                        "mode": "from_mask",
+                                        "src": {
+                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/EyeMask.png",
+                                            "channel": "luma",
                                             "invert": false
                                         }
+                                    },
+                                    {
+                                        "op": "mask",
+                                        "id": "OutlineMask",
+                                        "mode": "outline_uv_faces",
+                                        "thickness": 3,
+                                        "margin": 0,
+                                        "save": true,
+                                        "invert": true
+                                    },
+                                    {
+                                        "op": "mask_combine",
+                                        "id": "EyeOrOutline",
+                                        "expr": {
+                                            "op": "and",
+                                            "inputs": [{ "$ref": "EyeMask" }, { "$ref": "OutlineMask" }]
+                                        },
+                                        "save": true
+                                    },
+                                    {
+                                        "op": "desaturate",
+                                        "amount": 0.5,
+                                        "mask": { "$ref": "EyeMask", "invert": false }
                                     },
                                     {
                                         "op": "tint",
                                         "rgba": [ 0.2, 0.2, 0.2, 0.8 ],
                                         "amount": 1,
-                                        "mask": {
-                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
-                                            "invert": false
-                                        }
+                                        "mask": { "$ref": "EyeMask", "invert": false }
                                     },
                                     {
                                         "op": "tint",
-                                        "rgba": [ 0.5, 0.5, 0.0, 0.8 ],
+                                        "rgba": [ 0.6, 0.6, 0.2, 0.8 ],
                                         "amount": 1,
-                                        "mask": {
-                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/TintMask.png",
-                                            "invert": true
-                                        }
+                                        "mask": { "$ref": "EyeMask", "invert": true }
+                                    },
+                                    {
+                                        "op": "tint",
+                                        "rgba": [ 0.5, 0.2, 0.2, 0.8 ],
+                                        "amount": 1,
+                                        "mask": { "$ref": "OutlineMask", "invert": true }
                                     },
                                     {
                                         "op": "opacity",
-                                        "amount": 0.45,
+                                        "amount": 0.3,
                                         "mode": "dither",
                                         "pattern": "blue_noise",
                                         "mask": {
-                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/DitherMask.png",
+                                            "$ref": "EyeOrOutline",
                                             "channel": "luma",
                                             "threshold": 0.5,
                                             "invert": false
