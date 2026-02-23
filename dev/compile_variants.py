@@ -28,6 +28,28 @@ _BAYER8 = np.array([
 ], dtype=np.float32)
 
 
+def _iter_named_shapes(blocky_doc: Json) -> list[tuple[str | None, dict[str, Any]]]:
+    """
+    Returns (name, shape_dict) pairs.
+    Attempts to find a 'name' on the node that owns 'shape'.
+    """
+    out: list[tuple[str | None, dict[str, Any]]] = []
+
+    def walk(x: Json) -> None:
+        if isinstance(x, dict):
+            if "shape" in x and isinstance(x["shape"], dict):
+                nm = x.get("name")
+                out.append((nm if isinstance(nm, str) else None, x["shape"]))
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(blocky_doc)
+    return out
+
+
 def _mask01_from_alpha(img: Image.Image) -> np.ndarray:
     """
     White(1)=opaque region, Black(0)=transparent region based on image alpha>0.
@@ -249,12 +271,12 @@ def _resolve_engine_path_to_file(
 
 
 def _mask_registry_save(
-    mask_registry: Dict[str, np.ndarray],
-    mask_id: str,
-    out_texture_file: Path,
-    mask01: Optional[np.ndarray] = None,
-    *,
-    filename: Optional[str] = None,
+        mask_registry: Dict[str, np.ndarray],
+        mask_id: str,
+        out_texture_file: Path,
+        mask01: Optional[np.ndarray] = None,
+        *,
+        filename: Optional[str] = None,
 ) -> Path:
     """
     Save a registry mask to disk next to the output texture.
@@ -365,16 +387,105 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
             continue
         w, h = wh
 
-        # If face is rotated 90/270, swap w/h
+        # If face is rotated 90/270, swap w/h (bbox dims)
         angle = face.get("angle", 0)
+        a = 0
         if isinstance(angle, (int, float)):
             a = int(angle) % 360
             if a in (90, 270):
                 w, h = h, w
 
+        # --- IMPORTANT: offset anchor correction for rotated UVs ---
+        # Empirically (matches Blockbench negative size behavior):
+        #   angle 0   -> offset is top-left
+        #   angle 90  -> offset is top-right  (shift x left by w)
+        #   angle 180 -> offset is bottom-right (shift x left by w, y up by h)
+        #   angle 270 -> offset is bottom-left (shift y up by h)
+        if a == 90:
+            ox = ox - w
+        elif a == 180:
+            ox = ox - w
+            oy = oy - h
+        elif a == 270:
+            oy = oy - h
+
         rects.append((int(round(ox)), int(round(oy)), w, h))
 
     return rects
+
+
+def _uv_face_rects_by_shape(blocky_doc: Json) -> dict[str, list[tuple[int, int, int, int]]]:
+    """
+    Returns {shape_name: [rects...]} only for shapes that have a name.
+    """
+    if not isinstance(blocky_doc, dict):
+        return {}
+
+    m: dict[str, list[tuple[int, int, int, int]]] = {}
+    for nm, shape in _iter_named_shapes(blocky_doc):
+        if not nm or not isinstance(shape, dict):
+            continue
+        rects = _face_rects_from_shape(shape)
+        if rects:
+            m.setdefault(nm, []).extend(rects)
+    return m
+
+
+def _mask01_from_uv_rects(
+        *,
+        img_size: tuple[int, int],  # (W,H)
+        rects: list[tuple[int, int, int, int]],
+        inset: int = 0,
+) -> np.ndarray:
+    W, H = img_size
+    out = np.zeros((H, W), dtype=np.float32)
+    ins = int(inset)
+
+    for (x, y, w, h) in rects:
+        x0 = max(0, int(x) + ins)
+        y0 = max(0, int(y) + ins)
+        x1 = min(W, int(x + w) - ins)
+        y1 = min(H, int(y + h) - ins)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        out[y0:y1, x0:x1] = 1.0
+
+    return out
+
+
+def _match_name(name: str, match: dict[str, Any]) -> bool:
+    typ = str(match.get("type", "exact")).lower()
+    case = str(match.get("case", "insensitive")).lower()
+
+    n = name
+    if case != "sensitive":
+        n = n.lower()
+
+    if typ == "exact":
+        v = match.get("name")
+        if not isinstance(v, str): return False
+        v2 = v if case == "sensitive" else v.lower()
+        return n == v2
+
+    if typ in ("contains", "substring"):
+        v = match.get("text")
+        if not isinstance(v, str): return False
+        v2 = v if case == "sensitive" else v.lower()
+        return v2 in n
+
+    if typ == "prefix":
+        v = match.get("text")
+        if not isinstance(v, str): return False
+        v2 = v if case == "sensitive" else v.lower()
+        return n.startswith(v2)
+
+    if typ == "suffix":
+        v = match.get("text")
+        if not isinstance(v, str): return False
+        v2 = v if case == "sensitive" else v.lower()
+        return n.endswith(v2)
+
+    raise ValueError(f"Unknown match.type: {typ!r}")
 
 
 def _uv_face_rects_from_blockymodel(blocky_doc: Json) -> list[tuple[int, int, int, int]]:
@@ -1192,6 +1303,94 @@ def _generate_texture(
             # Where to derive the mask from
             if mode == "alpha":
                 mask01 = _mask01_from_alpha(img)
+            elif mode == "blocky_uv":
+                if blocky_doc_base is None:
+                    raise ValueError("mask.mode='blocky_uv' requires base_model_doc['Model'] to exist and load")
+
+                match = step.get("match")
+                if not isinstance(match, dict):
+                    raise ValueError("blocky_uv requires match:{...}")
+
+                inset = int(step.get("inset", 0))
+                per_item = bool(step.get("per_item", False))
+                combine = str(step.get("combine", "or")).lower()
+
+                # scale blockymodel UVs to current size (like you already do)
+                blocky_doc_scaled = json.loads(json.dumps(blocky_doc_base))
+                if current_tex_scale > 1:
+                    blocky_doc_scaled = _scale_blockymodel_for_texture_resize(blocky_doc_scaled, current_tex_scale)
+
+                by_shape = _uv_face_rects_by_shape(blocky_doc_scaled)
+
+                matched: list[tuple[str, list[tuple[int, int, int, int]]]] = []
+                for nm, rects in by_shape.items():
+                    if _match_name(nm, match):
+                        matched.append((nm, rects))
+
+                if not matched:
+                    raise ValueError(f"blocky_uv: no shapes matched {match}")
+
+                # Optional: fill type (rect vs alpha-constrained)
+                fill = step.get("fill") or {"type": "rect"}
+                if not isinstance(fill, dict):
+                    raise ValueError("blocky_uv.fill must be object")
+                fill_type = str(fill.get("type", "rect")).lower()
+
+                def make_one(rects: list[tuple[int, int, int, int]]) -> np.ndarray:
+                    m01 = _mask01_from_uv_rects(img_size=img.size, rects=rects, inset=inset)
+                    if fill_type == "alpha":
+                        th = int(fill.get("threshold", 1))
+                        a = np.asarray(img.convert("RGBA"))[..., 3]
+                        m01 = m01 * (a >= th).astype(np.float32)
+                    elif fill_type != "rect":
+                        raise ValueError(f"blocky_uv.fill.type must be rect|alpha, got {fill_type!r}")
+                    return np.clip(m01, 0.0, 1.0).astype(np.float32)
+
+                if per_item:
+                    id_prefix = str(step.get("id_prefix", ""))
+                    id_from = str(step.get("id_from", "shape_name")).lower()
+
+                    for nm, rects in matched:
+                        if id_from == "shape_name":
+                            kid = f"{id_prefix}{nm}"
+                        else:
+                            raise ValueError("blocky_uv.id_from must be 'shape_name' for now")
+
+                        km = make_one(rects)
+                        mask_registry[kid] = km
+
+                        if step.get("save") is True:
+                            _mask_registry_save(mask_registry, kid, out_file, km, filename=f"{kid}.png")
+
+                    # also allow writing a combined mask under mask_id if caller provided id
+                    if isinstance(mask_id, str) and mask_id:
+                        # union of all per-item
+                        acc = np.zeros((img.size[1], img.size[0]), dtype=np.float32)
+                        for _, rects in matched:
+                            acc = np.maximum(acc, make_one(rects))
+                        mask01 = acc
+                    else:
+                        # if no id, we’re done
+                        continue
+
+                else:
+                    # single combined mask under mask_id
+                    acc = None
+                    for _, rects in matched:
+                        m01 = make_one(rects)
+                        if acc is None:
+                            acc = m01
+                        else:
+                            if combine in ("or", "max"):
+                                acc = np.maximum(acc, m01)
+                            elif combine in ("and", "min"):
+                                acc = np.minimum(acc, m01)
+                            elif combine == "add":
+                                acc = np.clip(acc + m01, 0.0, 1.0)
+                            else:
+                                raise ValueError("blocky_uv.combine must be or/and/add/max/min")
+
+                    mask01 = acc if acc is not None else np.zeros((img.size[1], img.size[0]), dtype=np.float32)
             elif mode == "outline_uv_faces":
                 if blocky_doc_base is None:
                     raise ValueError("mask.mode='outline_uv_faces' requires base_model_doc['Model'] to exist and load")

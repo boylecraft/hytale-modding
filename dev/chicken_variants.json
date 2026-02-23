@@ -55,12 +55,13 @@
                                     {
                                         "op": "mask",
                                         "id": "EyeMask",
-                                        "mode": "from_mask",
-                                        "src": {
-                                            "path": "NPC/Livestock/Chicken_Variants/Bobby/Models/EyeMask.png",
-                                            "channel": "luma",
-                                            "invert": false
-                                        }
+                                        "mode": "blocky_uv",
+                                        "match": { "type": "contains", "text": "eye", "case": "insensitive" },
+                                        "combine": "or",
+                                        "fill": { "type": "alpha", "threshold": 1 },
+                                        "inset": 0,
+                                        "invert": true,
+                                        "save": true
                                     },
                                     {
                                         "op": "mask",
@@ -73,7 +74,7 @@
                                     },
                                     {
                                         "op": "mask_combine",
-                                        "id": "EyeOrOutline",
+                                        "id": "OpacityMask",
                                         "expr": {
                                             "op": "and",
                                             "inputs": [{ "$ref": "EyeMask" }, { "$ref": "OutlineMask" }]
@@ -105,11 +106,11 @@
                                     },
                                     {
                                         "op": "opacity",
-                                        "amount": 0.3,
+                                        "amount": 0.35,
                                         "mode": "dither",
                                         "pattern": "blue_noise",
                                         "mask": {
-                                            "$ref": "EyeOrOutline",
+                                            "$ref": "OpacityMask",
                                             "channel": "luma",
                                             "threshold": 0.5,
                                             "invert": false
