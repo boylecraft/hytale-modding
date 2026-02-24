@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hytale-modding"
+version = "0.0.1"
+description = "tools for modding hytale"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "pillow",
+]
+
+[project.scripts]
+compile-variants = "dev.compile_variants:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dev*"]

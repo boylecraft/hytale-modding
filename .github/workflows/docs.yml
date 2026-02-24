@@ -25,15 +25,16 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install pdoc
+      - name: Install project + pdoc
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pdoc
+          pip install .
+          pip install pdoc
 
       - name: Build docs
         run: |
           rm -rf docs
-          pdoc -o docs hytale_variant_compiler.py
+          PYTHONPATH=. pdoc -o docs dev
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

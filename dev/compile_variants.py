@@ -2266,7 +2266,6 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-
     # Optional debug: run only when explicitly requested
     if os.environ.get("HV_DEBUG_ALPHA") == "1":
         mod_base_dir = r'C:\dev\hytale\hytale-modding\packs\better_variants'
