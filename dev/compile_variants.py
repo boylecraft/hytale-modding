@@ -47,63 +47,63 @@ Configuration file format
 -------------------------
 Config JSON (commonly "variants.json") looks like:
 
-{
-  "version": 1,
-  "server_version": "2026.02.19-1a311a592",
-  "outputs": {
-    "model_dir": "Server/Models/Livestock",
-    "role_dir": "Server/NPC/Roles/Creature/Livestock"
-  },
-  "sources": {
-    "model": { "base": "Server/Models/Livestock/Chicken.json" },
-    "role":  { "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json" }
-  },
-  "variants": [
     {
-      "id": "Chicken_Bobby",
-      "patches": {
-        "model": [
-          {"op":"add","path":"/Particles","value":[ ... ]},
-          {"op":"replace","path":"/Texture","value":{"$gen_texture":{ ... }}}
-        ],
-        "role": [
-          {"op":"replace","path":"/Modify/Appearance","value":"Chicken_Bobby"}
-        ]
-      }
+      "version": 1,
+      "server_version": "2026.02.19-1a311a592",
+      "outputs": {
+        "model_dir": "Server/Models/Livestock",
+        "role_dir": "Server/NPC/Roles/Creature/Livestock"
+      },
+      "sources": {
+        "model": { "base": "Server/Models/Livestock/Chicken.json" },
+        "role":  { "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json" }
+      },
+      "variants": [
+        {
+          "id": "Chicken_Bobby",
+          "patches": {
+            "model": [
+              {"op":"add","path":"/Particles","value":[ ... ]},
+              {"op":"replace","path":"/Texture","value":{"$gen_texture":{ ... }}}
+            ],
+            "role": [
+              {"op":"replace","path":"/Modify/Appearance","value":"Chicken_Bobby"}
+            ]
+          }
+        }
+      ]
     }
-  ]
-}
 
 Texture generation spec
 -----------------------
 Example "$gen_texture" with multiple transforms and masks:
 
-{
-  "$gen_texture": {
-    "from": { "$base_model_texture": true },
-    "transform": [
-      {"op":"resize", "scale":4, "resample":"nearest"},
+    {
+      "$gen_texture": {
+        "from": { "$base_model_texture": true },
+        "transform": [
+          {"op":"resize", "scale":4, "resample":"nearest"},
 
-      {"op":"mask","id":"EyeMask","mode":"from_mask",
-       "src":{"path":"NPC/.../EyeMask.png","channel":"luma"}},
+          {"op":"mask","id":"EyeMask","mode":"from_mask",
+           "src":{"path":"NPC/.../EyeMask.png","channel":"luma"}},
 
-      {"op":"mask","id":"OutlineMask","mode":"outline_uv_faces",
-       "thickness":3,"margin":0,"invert":true,"save":true},
+          {"op":"mask","id":"OutlineMask","mode":"outline_uv_faces",
+           "thickness":3,"margin":0,"invert":true,"save":true},
 
-      {"op":"mask_combine","id":"EyeOrOutline",
-       "expr":{"op":"and","inputs":[{"$ref":"EyeMask"},{"$ref":"OutlineMask"}]},
-       "save":true},
+          {"op":"mask_combine","id":"EyeOrOutline",
+           "expr":{"op":"and","inputs":[{"$ref":"EyeMask"},{"$ref":"OutlineMask"}]},
+           "save":true},
 
-      {"op":"desaturate","amount":0.5,"mask":{"$ref":"EyeMask"}},
+          {"op":"desaturate","amount":0.5,"mask":{"$ref":"EyeMask"}},
 
-      {"op":"tint","rgba":[0.2,0.2,0.2,0.8],"amount":1,"mask":{"$ref":"EyeMask"}},
+          {"op":"tint","rgba":[0.2,0.2,0.2,0.8],"amount":1,"mask":{"$ref":"EyeMask"}},
 
-      {"op":"opacity","amount":0.3,"mode":"dither","pattern":"blue_noise",
-       "mask":{"$ref":"EyeOrOutline","threshold":0.5}}
-    ],
-    "out": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png"
-  }
-}
+          {"op":"opacity","amount":0.3,"mode":"dither","pattern":"blue_noise",
+           "mask":{"$ref":"EyeOrOutline","threshold":0.5}}
+        ],
+        "out": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png"
+      }
+    }
 
 Supported transform ops (current)
 ---------------------------------
