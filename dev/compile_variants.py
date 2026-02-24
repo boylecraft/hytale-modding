@@ -1,4 +1,183 @@
 #!/usr/bin/env python3
+"""
+hytale_variant_compiler.py
+
+Compiles Hytale NPC variants by applying JSON Patch operations to base model/role JSON files,
+optionally generating derived textures (and derived blockymodels) as part of the patch process.
+
+This script is designed to be run as a CLI tool and used in CI to regenerate mod assets
+whenever variant definitions change.
+
+Key features
+------------
+- Loads base assets from: <versions_root>/<server_version>/Assets/...
+- Loads base JSON documents referenced by config:
+  - sources.model.base (e.g. "Server/Models/Livestock/Chicken.json")
+  - sources.role.base  (e.g. "Server/NPC/Roles/Creature/Livestock/Chicken.json")
+- For each variant:
+  - Applies JSON Patch ops (replace/add/remove) to the base model and role docs
+  - Writes the generated JSON to mod_root/<outputs.model_dir>/<variant_id>.json and similarly for role
+  - Supports texture generation in-place when a model patch replaces "/Texture" with {"$gen_texture": {...}}
+
+Generated texture pipeline
+-------------------------
+When a model patch contains:
+
+    {"op":"replace","path":"/Texture","value":{"$gen_texture":{...}}}
+
+the generator will:
+1) load a source texture (from the base model texture or a provided path)
+2) run a sequence of "transform" steps
+3) write the output texture under mod_root/Common/<out>
+4) if resize.scale > 1, also generate a scaled Model.blockymodel next to the texture and patch /Model
+
+Mask system overview
+--------------------
+During texture generation a per-texture "mask_registry" exists:
+
+- transform op "mask" can create masks and store them by id
+- transforms can use masks via:
+    - {"mask": {"$ref": "MaskId", "invert": false}}
+    - {"mask": {"path": "NPC/.../SomeMask.png", "channel":"luma", "invert": false}}
+- "mask_combine" can combine masks using boolean-ish or numeric operations:
+    - and/or/xor/add/mul/max/min/not/threshold/scale
+- masks can be saved to disk for debugging with "save": true or an explicit engine path
+
+Configuration file format
+-------------------------
+Config JSON (commonly "variants.json") looks like:
+
+{
+  "version": 1,
+  "server_version": "2026.02.19-1a311a592",
+  "outputs": {
+    "model_dir": "Server/Models/Livestock",
+    "role_dir": "Server/NPC/Roles/Creature/Livestock"
+  },
+  "sources": {
+    "model": { "base": "Server/Models/Livestock/Chicken.json" },
+    "role":  { "base": "Server/NPC/Roles/Creature/Livestock/Chicken.json" }
+  },
+  "variants": [
+    {
+      "id": "Chicken_Bobby",
+      "patches": {
+        "model": [
+          {"op":"add","path":"/Particles","value":[ ... ]},
+          {"op":"replace","path":"/Texture","value":{"$gen_texture":{ ... }}}
+        ],
+        "role": [
+          {"op":"replace","path":"/Modify/Appearance","value":"Chicken_Bobby"}
+        ]
+      }
+    }
+  ]
+}
+
+Texture generation spec
+-----------------------
+Example "$gen_texture" with multiple transforms and masks:
+
+{
+  "$gen_texture": {
+    "from": { "$base_model_texture": true },
+    "transform": [
+      {"op":"resize", "scale":4, "resample":"nearest"},
+
+      {"op":"mask","id":"EyeMask","mode":"from_mask",
+       "src":{"path":"NPC/.../EyeMask.png","channel":"luma"}},
+
+      {"op":"mask","id":"OutlineMask","mode":"outline_uv_faces",
+       "thickness":3,"margin":0,"invert":true,"save":true},
+
+      {"op":"mask_combine","id":"EyeOrOutline",
+       "expr":{"op":"and","inputs":[{"$ref":"EyeMask"},{"$ref":"OutlineMask"}]},
+       "save":true},
+
+      {"op":"desaturate","amount":0.5,"mask":{"$ref":"EyeMask"}},
+
+      {"op":"tint","rgba":[0.2,0.2,0.2,0.8],"amount":1,"mask":{"$ref":"EyeMask"}},
+
+      {"op":"opacity","amount":0.3,"mode":"dither","pattern":"blue_noise",
+       "mask":{"$ref":"EyeOrOutline","threshold":0.5}}
+    ],
+    "out": "NPC/Livestock/Chicken_Variants/Bobby/Models/Texture.png"
+  }
+}
+
+Supported transform ops (current)
+---------------------------------
+- resize:
+    {"op":"resize","scale":4,"resample":"nearest|bilinear|bicubic|lanczos"}
+
+- mask:
+    {"op":"mask","id":"MaskId","mode":"alpha|outline|outline_uv_faces|from_mask|blocky_uv", ...}
+  Common fields:
+    - invert: bool
+    - save: true | "NPC/.../SomeMask.png"  (write debug mask)
+
+  mode="from_mask":
+    - src: {"path": "...", "channel":"luma|r|g|b|a", "invert":false}
+      or {"$ref":"OtherMaskId"}
+
+  mode="outline":
+    - thickness: int
+
+  mode="outline_uv_faces":
+    - thickness: int
+    - margin: int
+    - alpha_threshold: int (default 1)
+    - include_invisible: bool (default false)
+
+  mode="blocky_uv":
+    Creates mask(s) by matching named shapes in the blockymodel (Blockbench "name").
+    - match: {"type":"exact|contains|prefix|suffix","name|text":"...","case":"sensitive|insensitive"}
+    - inset: int (shrink rectangles)
+    - fill: {"type":"rect"} or {"type":"alpha","threshold":1}
+    - per_item: bool (if true, writes one mask per matched item name)
+    - id_prefix: str (prefix for per-item IDs)
+    - combine: "or|and|add|max|min" (how to combine if producing a single mask)
+    - include_invisible: bool (default false)
+
+- mask_combine:
+    {"op":"mask_combine","id":"NewMaskId","expr":{...},"save":true}
+
+- desaturate:
+    {"op":"desaturate","amount":0..1,"mask":{...}}
+
+- tint:
+    {"op":"tint","rgb":[r,g,b],"amount":0..1,"mask":{...}}
+    {"op":"tint","rgba":[r,g,b,a],"amount":0..1,"mask":{...}}
+
+- opacity (dither/cutout):
+    {"op":"opacity","amount":0..1,"mode":"dither","pattern":"bayer8|blue_noise", ...}
+    Optional region mask:
+      "mask": {"$ref":"MaskId","threshold":0.5,"invert":false}
+      OR "mask": {"expr":{...},"threshold":0.5}
+      OR "mask": {"path":"NPC/.../Mask.png","channel":"luma","threshold":0.5}
+
+JSON Patch support
+------------------
+Only these operations are supported:
+- add
+- remove
+- replace
+
+Paths use JSON Pointer (RFC 6901).
+
+Publishing docs with pdoc
+-------------------------
+pdoc will generate HTML API docs from this module docstring + function/class docstrings.
+
+Typical local usage:
+
+  python -m pip install pdoc
+  pdoc -o docs hytale_variant_compiler.py
+
+Then publish `docs/` via GitHub Pages.
+
+"""
+
 from __future__ import annotations
 
 from PIL import Image, ImageEnhance, ImageFilter
@@ -28,10 +207,20 @@ _BAYER8 = np.array([
 ], dtype=np.float32)
 
 
-def _iter_named_shapes(blocky_doc: Json) -> list[tuple[str | None, dict[str, Any]]]:
+def _iter_named_shapes(blocky_doc: Json, *, include_invisible: bool = False) -> list[tuple[str | None, dict[str, Any]]]:
     """
-    Returns (name, shape_dict) pairs.
-    Attempts to find a 'name' on the node that owns 'shape'.
+    Iterate named shapes in a blockymodel document.
+
+    Returns
+    -------
+    list[(name, shape_dict)]
+        Each item is (node_name, node["shape"]).
+
+    Notes
+    -----
+    - The "name" and "visible" fields live on the *node* that contains "shape".
+    - By default, nodes with "visible": false are skipped.
+      Set include_invisible=True to include them anyway.
     """
     out: list[tuple[str | None, dict[str, Any]]] = []
 
@@ -39,7 +228,10 @@ def _iter_named_shapes(blocky_doc: Json) -> list[tuple[str | None, dict[str, Any
         if isinstance(x, dict):
             if "shape" in x and isinstance(x["shape"], dict):
                 nm = x.get("name")
-                out.append((nm if isinstance(nm, str) else None, x["shape"]))
+                # visibility lives on the node (not the shape)
+                vis = x.get("visible", True)
+                if include_invisible or (vis is not False):
+                    out.append((nm if isinstance(nm, str) else None, x["shape"]))
             for v in x.values():
                 walk(v)
         elif isinstance(x, list):
@@ -56,8 +248,8 @@ def _mask01_from_alpha(img: Image.Image) -> np.ndarray:
     Returns float mask HxW in [0,1].
     """
     base = img.convert("RGBA")
-    a = np.asarray(base)[..., 3].astype(np.uint8)
-    m = (a > 0).astype(np.float32)
+    alpha = np.asarray(base)[..., 3].astype(np.uint8)
+    m = (alpha > 0).astype(np.float32)
     return m
 
 
@@ -144,6 +336,18 @@ def _mask_eval_expr(
       - {"op":"max"/"min","inputs":[...]}   (fuzzy combine)
       - {"op":"threshold","input":<expr>,"value":0.5}  (returns 0/1)
       - {"op":"scale","input":<expr>,"value":0.8}      (multiply)
+
+    Examples
+    --------
+    Combine two masks:
+    {"op":"or","inputs":[{"$ref":"EyeMask"},{"$ref":"OutlineMask"}]}
+
+    Keep only intersection:
+    {"op":"and","inputs":[{"$ref":"A"},{"$ref":"B"}]}
+
+    Invert:
+    {"op":"not","input":{"$ref":"EyeMask"}}
+
     """
     if not isinstance(expr, dict):
         raise ValueError("mask expr must be an object")
@@ -305,16 +509,21 @@ def _mask_registry_save(
     return out_mask_file
 
 
-def _iter_shapes(blocky_doc: Json) -> list[dict[str, Any]]:
+def _iter_shapes(blocky_doc: Json, *, include_invisible: bool = False) -> list[dict[str, Any]]:
     shapes: list[dict[str, Any]] = []
 
     def walk(x: Json) -> None:
         if isinstance(x, dict):
             # In blockymodel, shapes typically live under node["shape"]
             if "shape" in x and isinstance(x["shape"], dict):
-                shapes.append(x["shape"])
+                # visibility lives on the node (not the shape)
+                vis = x.get("visible", True)
+                if include_invisible or (vis is not False):
+                    shapes.append(x["shape"])
+
             for v in x.values():
                 walk(v)
+
         elif isinstance(x, list):
             for v in x:
                 walk(v)
@@ -325,9 +534,27 @@ def _iter_shapes(blocky_doc: Json) -> list[dict[str, Any]]:
 
 def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, int]]:
     """
-    Returns list of UV rects (x,y,w,h) for this shape in texture pixel coords.
-    Handles box + quad.
-    Ignores rotation/mirror because for rect bounds we only need w/h (but angle swaps w/h).
+    Extract UV rectangles for each face in a shape.
+
+    Parameters
+    ----------
+    shape:
+        A blockymodel "shape" object (usually node["shape"]).
+
+    Returns
+    -------
+    list[(x, y, w, h)]
+        UV rectangles in *texture pixel coordinates*.
+
+    Notes
+    -----
+    - Supports "box" and "quad" shapes.
+    - Handles face rotation ("angle") by:
+        1) swapping (w,h) for 90/270 degrees (bounding box dimensions)
+        2) adjusting the offset anchor to match Blockbench's rotated UV behavior:
+           angle 90  -> offset treated as top-right  (x -= w)
+           angle 180 -> offset treated as bottom-right (x -= w, y -= h)
+           angle 270 -> offset treated as bottom-left (y -= h)
     """
     tl = shape.get("textureLayout")
     settings = shape.get("settings")
@@ -342,7 +569,7 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
 
     rects: list[tuple[int, int, int, int]] = []
 
-    def wh_for_face(face: str) -> tuple[int, int] | None:
+    def wh_for_face(nm: str) -> tuple[int, int] | None:
         if typ == "box":
             sx = size.get("x")
             sy = size.get("y")
@@ -354,12 +581,12 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
             sz = int(round(sz))
 
             # Standard cube UV sizing
-            if face in ("top", "bottom"):
-                return (sx, sz)
-            if face in ("front", "back"):
-                return (sx, sy)
-            if face in ("left", "right"):
-                return (sz, sy)
+            if nm in ("top", "bottom"):
+                return sx, sz
+            if nm in ("front", "back"):
+                return sx, sy
+            if nm in ("left", "right"):
+                return sz, sy
             return None
 
         if typ == "quad":
@@ -367,7 +594,7 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
             sy = size.get("y")
             if not all(isinstance(v, (int, float)) for v in (sx, sy)):
                 return None
-            return (int(round(sx)), int(round(sy)))
+            return int(round(sx)), int(round(sy))
 
         return None
 
@@ -389,10 +616,10 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
 
         # If face is rotated 90/270, swap w/h (bbox dims)
         angle = face.get("angle", 0)
-        a = 0
+        ang = 0
         if isinstance(angle, (int, float)):
-            a = int(angle) % 360
-            if a in (90, 270):
+            ang = int(angle) % 360
+            if ang in (90, 270):
                 w, h = h, w
 
         # --- IMPORTANT: offset anchor correction for rotated UVs ---
@@ -401,12 +628,12 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
         #   angle 90  -> offset is top-right  (shift x left by w)
         #   angle 180 -> offset is bottom-right (shift x left by w, y up by h)
         #   angle 270 -> offset is bottom-left (shift y up by h)
-        if a == 90:
+        if ang == 90:
             ox = ox - w
-        elif a == 180:
+        elif ang == 180:
             ox = ox - w
             oy = oy - h
-        elif a == 270:
+        elif ang == 270:
             oy = oy - h
 
         rects.append((int(round(ox)), int(round(oy)), w, h))
@@ -414,15 +641,30 @@ def _face_rects_from_shape(shape: dict[str, Any]) -> list[tuple[int, int, int, i
     return rects
 
 
-def _uv_face_rects_by_shape(blocky_doc: Json) -> dict[str, list[tuple[int, int, int, int]]]:
+def _uv_face_rects_by_shape(
+        blocky_doc: Json,
+        *,
+        include_invisible: bool = False) -> dict[str, list[tuple[int, int, int, int]]]:
     """
-    Returns {shape_name: [rects...]} only for shapes that have a name.
+    Map shape names to UV rectangles.
+
+    Returns only shapes that have a string node "name".
+
+    Parameters
+    ----------
+    include_invisible:
+        If False (default), skip nodes with "visible": false.
+
+    Returns
+    -------
+    dict[name -> rects]
+        Where rects is a list of (x,y,w,h) UV rectangles.
     """
     if not isinstance(blocky_doc, dict):
         return {}
 
     m: dict[str, list[tuple[int, int, int, int]]] = {}
-    for nm, shape in _iter_named_shapes(blocky_doc):
+    for nm, shape in _iter_named_shapes(blocky_doc, include_invisible=include_invisible):
         if not nm or not isinstance(shape, dict):
             continue
         rects = _face_rects_from_shape(shape)
@@ -437,15 +679,15 @@ def _mask01_from_uv_rects(
         rects: list[tuple[int, int, int, int]],
         inset: int = 0,
 ) -> np.ndarray:
-    W, H = img_size
-    out = np.zeros((H, W), dtype=np.float32)
+    wid, ht = img_size
+    out = np.zeros((ht, wid), dtype=np.float32)
     ins = int(inset)
 
     for (x, y, w, h) in rects:
         x0 = max(0, int(x) + ins)
         y0 = max(0, int(y) + ins)
-        x1 = min(W, int(x + w) - ins)
-        y1 = min(H, int(y + h) - ins)
+        x1 = min(wid, int(x + w) - ins)
+        y1 = min(ht, int(y + h) - ins)
         if x1 <= x0 or y1 <= y0:
             continue
         out[y0:y1, x0:x1] = 1.0
@@ -454,6 +696,28 @@ def _mask01_from_uv_rects(
 
 
 def _match_name(name: str, match: dict[str, Any]) -> bool:
+    """
+    Match a shape name using a small declarative matcher.
+
+    match format
+    ------------
+    {
+      "type": "exact|contains|prefix|suffix",
+      "name": "Eye"         # for exact
+      "text": "eye"         # for others
+      "case": "sensitive|insensitive"  # default: insensitive
+    }
+
+    Returns
+    -------
+    bool
+        True if name matches.
+
+    Raises
+    ------
+    ValueError
+        If match.type is unknown.
+    """
     typ = str(match.get("type", "exact")).lower()
     case = str(match.get("case", "insensitive")).lower()
 
@@ -463,38 +727,45 @@ def _match_name(name: str, match: dict[str, Any]) -> bool:
 
     if typ == "exact":
         v = match.get("name")
-        if not isinstance(v, str): return False
+        if not isinstance(v, str):
+            return False
         v2 = v if case == "sensitive" else v.lower()
         return n == v2
 
     if typ in ("contains", "substring"):
         v = match.get("text")
-        if not isinstance(v, str): return False
+        if not isinstance(v, str):
+            return False
         v2 = v if case == "sensitive" else v.lower()
         return v2 in n
 
     if typ == "prefix":
         v = match.get("text")
-        if not isinstance(v, str): return False
+        if not isinstance(v, str):
+            return False
         v2 = v if case == "sensitive" else v.lower()
         return n.startswith(v2)
 
     if typ == "suffix":
         v = match.get("text")
-        if not isinstance(v, str): return False
+        if not isinstance(v, str):
+            return False
         v2 = v if case == "sensitive" else v.lower()
         return n.endswith(v2)
 
     raise ValueError(f"Unknown match.type: {typ!r}")
 
 
-def _uv_face_rects_from_blockymodel(blocky_doc: Json) -> list[tuple[int, int, int, int]]:
+def _uv_face_rects_from_blockymodel(
+        blocky_doc: Json,
+        *,
+        include_invisible: bool = False,
+) -> list[tuple[int, int, int, int]]:
     if not isinstance(blocky_doc, dict):
         return []
     rects: list[tuple[int, int, int, int]] = []
-    for shape in _iter_shapes(blocky_doc):
-        if isinstance(shape, dict):
-            rects.extend(_face_rects_from_shape(shape))
+    for shape in _iter_shapes(blocky_doc, include_invisible=include_invisible):
+        rects.extend(_face_rects_from_shape(shape))
     return rects
 
 
@@ -513,10 +784,10 @@ def _outline_mask_from_uv_faces(
     """
     base = img.convert("RGBA")
     arr = np.asarray(base).astype(np.uint8)
-    H, W = arr.shape[0], arr.shape[1]
+    ht, wid = arr.shape[0], arr.shape[1]
     alpha = arr[..., 3]
 
-    out = np.zeros((H, W), dtype=np.float32)
+    out = np.zeros((ht, wid), dtype=np.float32)
 
     t = int(thickness_px)
     m = int(margin_px)
@@ -527,8 +798,8 @@ def _outline_mask_from_uv_faces(
         # clamp rect to image bounds
         x0 = max(0, x)
         y0 = max(0, y)
-        x1 = min(W, x + w)
-        y1 = min(H, y + h)
+        x1 = min(wid, x + w)
+        y1 = min(ht, y + h)
         if x1 <= x0 or y1 <= y0:
             continue
 
@@ -999,26 +1270,6 @@ def _apply_opacity_dither(
     return Image.fromarray(out, mode="RGBA")
 
 
-def _apply_opacity_dither_rgba_worked(img: Image.Image, *, amount: float, preserve_holes: bool = True) -> Image.Image:
-    base = img.convert("RGBA")
-    arr = np.asarray(base).astype(np.uint8)
-    h, w = arr.shape[:2]
-
-    th = _bayer_threshold_map(h, w, size=8)  # 0..1
-
-    alph = arr[..., 3].astype(np.float32) / 255.0
-    # coverage = np.clip(alph * float(amount), 0.0, 1.0)
-    coverage = np.clip(float(amount), 0.0, 1.0)
-
-    keep = th < coverage
-
-    if preserve_holes:
-        keep &= (arr[..., 3] > 0)
-
-    arr[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
-    return Image.fromarray(arr, "RGBA")
-
-
 def _apply_opacity_dither_broke(
         img: Image.Image,
         *,
@@ -1151,8 +1402,54 @@ def _generate_texture(
         spec: Dict[str, Any],
 ) -> tuple[str, str | None]:
     """
-    Returns the engine texture path string that should be written into /Texture,
-    and writes the generated file into mod_root/Common/...
+    Generate a derived texture (and optionally a derived blockymodel) using a transform pipeline.
+
+    This function is called when a model JSON patch replaces "/Texture" with a "$gen_texture" spec.
+
+    Pipeline overview:
+    - Resolve input texture:
+        - {"from": {"$base_model_texture": true}} uses base_model_doc["Texture"]
+        - {"from": {"path":"NPC/.../Texture.png"}} uses an explicit engine path
+    - Load the source texture from base assets.
+    - Run transform steps in order, mutating the working image.
+    - Write output texture under mod_root/Common/<spec["out"]>.
+    - If any resize scale > 1 was used, write a scaled Model.blockymodel next to the texture.
+
+    Mask registry:
+    - Per-run dictionary of masks (float arrays 0..1) addressed by id.
+    - mask ops create masks; other ops can reference masks via {"$ref": "..."}.
+    - mask_combine can synthesize new masks from existing ones.
+
+    Parameters
+    ----------
+    base_assets_root:
+        Base assets folder: <versions_root>/<server_version>/Assets
+    mod_root:
+        Mod root where Common/ is written.
+    base_model_doc:
+        The base model JSON (used to find Texture and Model paths).
+    spec:
+        The "$gen_texture" object from config.
+
+    Returns
+    -------
+    (texture_engine_path, blockymodel_engine_path_or_none)
+
+    Examples
+    --------
+    Minimal recolor (tint everything):
+    {
+      "$gen_texture": {
+        "from": {"$base_model_texture": true},
+        "transform": [
+          {"op":"tint","rgb":[0.8,0.5,0.5],"amount":1}
+        ],
+        "out": "NPC/.../MyVariant/Models/Texture.png"
+      }
+    }
+
+    Masked tint + blue-noise opacity:
+    See module docstring "Texture generation spec".
     """
     scale_used = 1
 
@@ -1320,7 +1617,8 @@ def _generate_texture(
                 if current_tex_scale > 1:
                     blocky_doc_scaled = _scale_blockymodel_for_texture_resize(blocky_doc_scaled, current_tex_scale)
 
-                by_shape = _uv_face_rects_by_shape(blocky_doc_scaled)
+                include_invisible = bool(step.get("include_invisible", False))
+                by_shape = _uv_face_rects_by_shape(blocky_doc_scaled, include_invisible=include_invisible)
 
                 matched: list[tuple[str, list[tuple[int, int, int, int]]]] = []
                 for nm, rects in by_shape.items():
@@ -1336,15 +1634,15 @@ def _generate_texture(
                     raise ValueError("blocky_uv.fill must be object")
                 fill_type = str(fill.get("type", "rect")).lower()
 
-                def make_one(rects: list[tuple[int, int, int, int]]) -> np.ndarray:
-                    m01 = _mask01_from_uv_rects(img_size=img.size, rects=rects, inset=inset)
+                def make_one(rect_list: list[tuple[int, int, int, int]]) -> np.ndarray:
+                    mask = _mask01_from_uv_rects(img_size=img.size, rects=rect_list, inset=inset)
                     if fill_type == "alpha":
                         th = int(fill.get("threshold", 1))
                         a = np.asarray(img.convert("RGBA"))[..., 3]
-                        m01 = m01 * (a >= th).astype(np.float32)
+                        mask = mask * (a >= th).astype(np.float32)
                     elif fill_type != "rect":
                         raise ValueError(f"blocky_uv.fill.type must be rect|alpha, got {fill_type!r}")
-                    return np.clip(m01, 0.0, 1.0).astype(np.float32)
+                    return np.clip(mask, 0.0, 1.0).astype(np.float32)
 
                 if per_item:
                     id_prefix = str(step.get("id_prefix", ""))
@@ -1359,7 +1657,7 @@ def _generate_texture(
                         km = make_one(rects)
                         mask_registry[kid] = km
 
-                        if step.get("save") is True:
+                        if step.get("save"):
                             _mask_registry_save(mask_registry, kid, out_file, km, filename=f"{kid}.png")
 
                     # also allow writing a combined mask under mask_id if caller provided id
@@ -1403,7 +1701,8 @@ def _generate_texture(
                 if current_tex_scale > 1:
                     blocky_doc_scaled = _scale_blockymodel_for_texture_resize(blocky_doc_scaled, current_tex_scale)
 
-                uv_rects = _uv_face_rects_from_blockymodel(blocky_doc_scaled)
+                include_invisible = bool(step.get("include_invisible", False))
+                uv_rects = _uv_face_rects_from_blockymodel(blocky_doc_scaled, include_invisible=include_invisible)
 
                 mask01 = _outline_mask_from_uv_faces(
                     img,
@@ -1446,7 +1745,7 @@ def _generate_texture(
                 # Save to explicit engine path (preferred for repeatability)
                 out_mask_file = _npc_path_to_mod_common_any(mod_root, save_engine_path)
                 _save_mask01_png(mask01, out_mask_file)
-            elif step.get("save") is True:
+            elif step.get("save"):
                 # Save next to the output texture as <id>.png
                 out_tex_p = Path(out_texture_engine_path)
                 out_mask_engine = str(out_tex_p.parent / f"{mask_id}.png").replace("\\", "/")
@@ -1597,8 +1896,36 @@ def _get(doc: Json, ptr: str) -> Json:
 
 def apply_json_patch(doc: Json, ops: List[Dict[str, Any]], *, strict_paths: bool = True) -> Json:
     """
-    Minimal JSON Patch (RFC 6902) support for: replace, add, remove.
-    - strict_paths=True: missing path => error (recommended for catching drift)
+    Apply a subset of JSON Patch (RFC 6902) operations to a JSON document.
+
+    Supported operations:
+    - add
+    - remove
+    - replace
+
+    Parameters
+    ----------
+    doc:
+        JSON-like structure (dict/list/scalars).
+    ops:
+        List of patch operations; each op is a dict containing:
+          - op: "add" | "remove" | "replace"
+          - path: JSON Pointer string (RFC 6901)
+          - value: required for add/replace
+    strict_paths:
+        If True, replace/remove errors when the target path does not exist.
+
+    Returns
+    -------
+    Json
+        The modified document (mutated in-place and also returned).
+
+    Examples
+    --------
+    > doc = {"a": {"b": [1,2,3]}}
+    > apply_json_patch(doc, [{"op":"replace","path":"/a/b/1","value":99}])
+    {'a': {'b': [1, 99, 3]}}
+
     """
     for op in ops:
         operation = op.get("op")
@@ -1700,6 +2027,29 @@ class Config:
 
 
 def load_config(path: Path) -> Config:
+    """
+    Load and validate the variants configuration JSON.
+
+    Parameters
+    ----------
+    path:
+        Path to the config JSON (commonly "variants.json").
+
+    Returns
+    -------
+    Config
+        Parsed configuration with server_version, sources, outputs, and variants.
+
+    Raises
+    ------
+    ValueError
+        If required keys are missing or have invalid types.
+
+    Notes
+    -----
+    The config format is described in the module docstring under
+    "Configuration file format".
+    """
     raw = json.loads(path.read_text(encoding="utf-8"))
 
     server_version = raw.get("server_version")
@@ -1770,6 +2120,35 @@ def compile_variants(
         mod_root: Path,
         strict_paths: bool = True,
 ) -> None:
+    """
+    Compile all variants described in the config into concrete model/role JSON assets.
+
+    This:
+    - reads the base model/role JSON from the base asset tree
+    - applies each variant's JSON Patch ops
+    - writes the resulting JSON under mod_root/<outputs.*_dir>/
+    - intercepts /Texture replacements containing {"$gen_texture": ...} to generate textures
+
+    Parameters
+    ----------
+    config_path:
+        Path to the config JSON.
+    versions_root:
+        Folder containing server versions:
+            <versions_root>/<server_version>/Assets/...
+    mod_root:
+        Mod output root (contains Common/, Server/, manifest.json).
+    strict_paths:
+        If True, JSON Patch replace/remove will error if the path does not exist.
+        If False, missing paths are tolerated (not recommended).
+
+    Raises
+    ------
+    FileNotFoundError
+        If base asset folders/files do not exist.
+    ValueError
+        If config is invalid or a patch/transform step is invalid.
+    """
     cfg = load_config(config_path)
 
     # Base assets root is the Hytale "Assets" directory for the given server version.
@@ -1844,6 +2223,18 @@ def compile_variants(
 
 
 def main() -> None:
+    """
+    CLI entry point.
+
+    Usage
+    -----
+    python hytale_variant_compiler.py --config variants.json --mod-root <mod> --versions-root <versions>
+
+    Flags
+    -----
+    --no-strict
+        Allow missing JSON Patch paths (replace/remove). Useful when prototyping, risky in CI.
+    """
     parser = argparse.ArgumentParser(description="Compile Hytale NPC texture variants into full mod assets.")
     parser.add_argument("--config", required=True, type=Path, help="Path to variants.json")
     parser.add_argument("--mod-root", required=True, type=Path,
@@ -1874,11 +2265,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    texture = r'C:\dev\hytale\hytale-modding\packs\better_variants\Common\NPC\Livestock\Chicken_Variants\Bobby\Models\Texture.png'
-    if not os.path.exists(texture):
-        print(f"{texture} not exists")
 
-    tex_img = Image.open(texture).convert("RGBA")
-    alpha = np.asarray(tex_img)[..., 3]
-    print("alpha==0:", (alpha == 0).sum(), " / ", alpha.size)
-    print("alpha unique:", np.unique(alpha)[:20], "...")
+
+    # Optional debug: run only when explicitly requested
+    if os.environ.get("HV_DEBUG_ALPHA") == "1":
+        mod_base_dir = r'C:\dev\hytale\hytale-modding\packs\better_variants'
+        texture = rf'{mod_base_dir}\Common\NPC\Livestock\Chicken_Variants\Bobby\Models\Texture.png'
+        if not os.path.exists(texture):
+            print(f"{texture} not exists")
+
+        tex_img = Image.open(texture).convert("RGBA")
+        alpha_chk = np.asarray(tex_img)[..., 3]
+        print("alpha==0:", np.sum(alpha_chk == 0), " / ", alpha_chk.size)
+        print("alpha unique:", np.unique(alpha_chk)[:20], "...")
